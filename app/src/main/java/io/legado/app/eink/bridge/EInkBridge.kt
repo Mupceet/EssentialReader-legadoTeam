@@ -12,6 +12,7 @@ import io.legado.app.ui.book.read.page.provider.ChapterProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import splitties.init.appCtx
 import io.legado.app.utils.getPrefBoolean
@@ -38,11 +39,20 @@ private const val KEY_PAGE_TURN_RIPPLE_MODE = "einkPageTurnRippleMode"
 /** 最近文件字体历史自有键（换行分隔 path 列表，编码语义在模块侧）。 */
 private const val KEY_RECENT_FONTS = "einkRecentFontPaths"
 
+/** 「我的 → 字体设置」反显记录：所选字体源 path。 */
+private const val KEY_APP_FONT_SOURCE = "einkAppFontSourcePath"
+
+/** 反显记录：安装后的私有副本路径（与当前生效副本相等时源记录有效）。 */
+private const val KEY_APP_FONT_COPY = "einkAppFontCopyPath"
+
+/** 段评气泡显示开关自有键（宿主引擎无总开关，E-Ink 侧自管，默认开）。 */
+private const val KEY_SHOW_REVIEW_BUBBLES = "einkShowReviewBubbles"
+
 /** 本宿主完整模式无界面字体缩放设置：E-Ink 自管键（0 = 未设置，跟随系统）。 */
 private const val KEY_FONT_SCALE = "fontScale"
 
 /**
- * E-Ink 引擎桥接层装配入口（本宿主 = legado-with-MD3 旧栈，无设置网关/
+ * E-Ink 引擎桥接层装配入口（本宿主 = 经典 legado 栈，无设置网关/
  * Koin，全部经 AppConfig / ReadBookConfig / SharedPreferences 扩展读写）。
  *
  * 由入口子类 EInkMainActivity 的 onInstallEngines 钩子调用（模块模板基类
@@ -61,6 +71,24 @@ object EInkBridge {
     /** 模块页脚顶部的自动翻页进度条高度（dp，带宽预算内扣除）。 */
     internal const val TIP_PROGRESS_BAR_DP = 2
 
+    /**
+     * 当前在前的 E-Ink 宿主 Activity（EinkMainActivity onStart/onStop 挂载）。
+     * 端口实现弹出宿主 UI 层（段评半屏 WebView 等宿主 DialogFragment）的事务
+     * 宿主与生命周期作用域来源；无前台活动时（退后台/已销毁）相关分派
+     * 静默放弃。
+     */
+    private var hostActivity: androidx.appcompat.app.AppCompatActivity? = null
+
+    fun attachHostActivity(activity: androidx.appcompat.app.AppCompatActivity) {
+        hostActivity = activity
+    }
+
+    fun detachHostActivity(activity: androidx.appcompat.app.AppCompatActivity) {
+        if (hostActivity === activity) hostActivity = null
+    }
+
+    fun hostActivity(): androidx.appcompat.app.AppCompatActivity? = hostActivity
+
     fun install() {
         EInkEngineRegistry.install(
             globalSettings = GlobalSettingsImpl,
@@ -74,12 +102,16 @@ object EInkBridge {
             appUpdateEngine = AppUpdateEngineImpl,
             marksEngine = MarksEngineImpl,
             bookshelfGroupEngine = BookshelfGroupEngineImpl,
+            backupSyncEngine = BackupSyncEngineImpl,
+            pageTurnEffectEngine = PageTurnEffectEngineImpl,
         )
         // 封面开关为快照状态缓存：每次进入 E-Ink 与宿主设置对齐，
         // 防止完整模式（或上一会话）修改后的陈旧值
         GlobalSettingsImpl.syncUseDefaultCover()
         // tip 带预留按当前可见性同步（引擎排版避让页眉/页脚带）
         ReaderEngineImpl.syncTipReserves()
+        // 应用字体快照与偏好记录对齐（副本可能被系统清理）
+        EinkAppFonts.reload()
     }
 
     /**
@@ -89,6 +121,73 @@ object EInkBridge {
     fun resetEngineDecorations() {
         ChapterProvider.einkHeaderReserveDp = 0
         ChapterProvider.einkFooterReserveDp = 0
+    }
+}
+
+/**
+ * E-Ink 应用字体（界面字体）状态：本宿主完整模式无应用字体概念，
+ * E-Ink 自管——源字体复制入私有目录，[android.graphics.Typeface] 进程
+ * 级缓存，状态流驱动组合侧重组（[io.legado.app.eink.EinkMainActivity]
+ * 的 uiFontFamily 钩子订阅）。仅作用于 E-Ink 界面（KDoc 明示范围，
+ * 与 md3 宿主「完整模式外观字体共享」形态的差异点）。
+ */
+internal object EinkAppFonts {
+
+    /** 应用字体私有副本目录（filesDir/eink_fonts/）。 */
+    internal val fontDir get() = java.io.File(appCtx.filesDir, "eink_fonts")
+
+    private val state = MutableStateFlow<android.graphics.Typeface?>(null)
+
+    /** 当前生效字体（null = 未设置/加载失败，平台默认）。 */
+    val typeface: kotlinx.coroutines.flow.StateFlow<android.graphics.Typeface?> = state
+
+    /** 按偏好记录重载副本（install 与每次 set/clear 后调用）。 */
+    fun reload() {
+        val copyPath = einkSharedPreferences().getString(KEY_APP_FONT_COPY, null)
+        state.value = copyPath?.let { path ->
+            runCatching { android.graphics.Typeface.createFromFile(path) }.getOrNull()
+        }
+    }
+
+    /** 记录的当前副本路径（文件仍存在时）。 */
+    fun activeCopyPath(): String? =
+        einkSharedPreferences().getString(KEY_APP_FONT_COPY, null)
+            ?.takeIf { java.io.File(it).exists() }
+
+    /** 安装新副本：复制入私有目录、清理旧副本、写回记录并重载。 */
+    fun install(sourcePath: String): Boolean {
+        val uri = android.net.Uri.parse(sourcePath)
+        val input = runCatching { appCtx.contentResolver.openInputStream(uri) }
+            .getOrNull() ?: return false
+        fontDir.mkdirs()
+        val target = java.io.File(fontDir, "app_font_${System.currentTimeMillis()}")
+        val ok = runCatching {
+            input.use { src ->
+                target.outputStream().use { src.copyTo(it) }
+            }
+        }.isSuccess
+        if (!ok) {
+            target.delete()
+            return false
+        }
+        // 清理旧副本（仅保留新副本），再写记录
+        fontDir.listFiles()?.forEach { if (it != target) it.delete() }
+        einkSharedPreferences().edit()
+            .putString(KEY_APP_FONT_SOURCE, sourcePath)
+            .putString(KEY_APP_FONT_COPY, target.absolutePath)
+            .apply()
+        reload()
+        return true
+    }
+
+    /** 清除副本与记录并重载（回平台默认）。 */
+    fun clear() {
+        fontDir.listFiles()?.forEach { it.delete() }
+        einkSharedPreferences().edit()
+            .remove(KEY_APP_FONT_SOURCE)
+            .remove(KEY_APP_FONT_COPY)
+            .apply()
+        reload()
     }
 }
 
@@ -197,23 +296,20 @@ private object GlobalSettingsImpl : GlobalSettings {
         }
 
     /**
-     * 段评气泡：宿主不支持，恒 false（写丢弃）。
-     *
-     * 宿主的 enableReview 为 DEBUG 构建专属实验特性（release 恒关），且为
-     * 半成品：评论数硬编码（ReviewColumn count=100）、无段评数据管线、
-     * 引擎靠向标题/段落尾部注入 reviewChar「▨」再按行尾条件转自绘评论钮
-     * ——与契约的段评模型（带 click 脚本的图片槽位）不同构，转发会把
-     * 注入字符漏进页快照文本块（真机表现为标题与段尾的小方块）。
-     *
-     * 契约改进已落地（模块 0.6.0）：supportsReviewBubbles 能力声明，模块
-     * 据此隐藏「显示段评气泡」开关——本宿主声明不支持。
+     * 段评气泡显示开关（E-Ink 自有偏好，默认开）：宿主引擎有完整段评
+     * 管线（书源 ruleReview / 图片选项 reviewCount → ImageColumn 携
+     * click 脚本），但无总开关设置——完整模式段评列随书源配置恒渲染，
+     * E-Ink 侧以本键自管（模块「显示段评气泡」开关读写此键）。
      */
     override var showReviewBubbles: Boolean
-        get() = false
-        set(value) {}
+        get() = einkSharedPreferences().getBoolean(KEY_SHOW_REVIEW_BUBBLES, true)
+        set(value) {
+            einkSharedPreferences().edit()
+                .putBoolean(KEY_SHOW_REVIEW_BUBBLES, value).apply()
+        }
 
     override val supportsReviewBubbles: Boolean
-        get() = false
+        get() = true
 
     /**
      * 点击区域九宫格（E-Ink 自有偏好，不转发完整模式 clickAction* 键）：
@@ -227,9 +323,9 @@ private object GlobalSettingsImpl : GlobalSettings {
         }
 
     /**
-     * 翻页水波纹档位（E-Ink 自有偏好，默认关）：档位行仅在注册
-     * PageTurnEffectEngine 时可见，本宿主未注册（档位行不渲染），
-     * 存储位仍保留以承接后续注册。
+     * 翻页水波纹档位（E-Ink 自有偏好，默认关）：已注册
+     * [PageTurnEffectEngineImpl]（掌阅 EPDC 固件反射实现）——非掌阅
+     * 设备 supported=false，档位行自动隐藏，存储位保留。
      */
     override var pageTurnRippleMode: PageTurnRippleMode
         get() = PageTurnRippleMode.entries.firstOrNull {
@@ -293,5 +389,38 @@ private object GlobalSettingsImpl : GlobalSettings {
         get() = AppConfig.syncBookProgress
         set(value) {
             appCtx.putPrefBoolean(PreferKey.syncBookProgress, value)
+        }
+
+    // —— 应用界面字体（E-Ink 自管，仅作用于 E-Ink 界面——本宿主完整
+    // 模式无应用字体概念；md3 宿主为「完整模式外观字体共享」形态）——
+
+    /**
+     * 安装应用字体：源 path（SAF content/file URI）复制入私有目录后
+     * 生效。复制串行执行（einkSettingsWriteScope 单协程顺序）；源不可
+     * 读等失败静默丢弃（当前字体保持不变，对齐 md3 的降级口径）。
+     */
+    override fun setAppFont(sourcePath: String) {
+        einkSettingsWriteScope.launch {
+            EinkAppFonts.install(sourcePath)
+        }
+    }
+
+    override fun clearAppFont() {
+        einkSettingsWriteScope.launch {
+            EinkAppFonts.clear()
+        }
+    }
+
+    override val hasCustomAppFont: Boolean
+        get() = EinkAppFonts.activeCopyPath() != null
+
+    /**
+     * 反显匹配：E-Ink 侧选择时记录的 源 path + 副本路径，仅当记录副本
+     * 仍是当前生效副本时返回源 path。
+     */
+    override val currentAppFontListPath: String?
+        get() = EinkAppFonts.activeCopyPath()?.let { active ->
+            einkSharedPreferences().getString(KEY_APP_FONT_SOURCE, null)
+                ?.takeIf { _ -> java.io.File(active).exists() }
         }
 }

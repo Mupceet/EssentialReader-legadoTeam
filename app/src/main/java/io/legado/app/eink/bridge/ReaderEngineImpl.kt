@@ -1,7 +1,10 @@
 package io.legado.app.eink.bridge
 
 import android.graphics.Typeface
+import androidx.lifecycle.lifecycleScope
+import com.script.rhino.runScriptWithContext
 import io.legado.app.constant.AppConst
+import io.legado.app.constant.AppLog
 import io.legado.app.constant.BookType
 import io.legado.app.constant.EventBus
 import io.legado.app.constant.PreferKey
@@ -21,10 +24,12 @@ import io.legado.app.eink.contract.ReaderStyleCatalog
 import io.legado.app.eink.contract.ReaderSyncTrigger
 import io.legado.app.eink.contract.ReaderTextStyle
 import io.legado.app.eink.contract.ReaderTipTypefaces
+import io.legado.app.exception.NoStackTraceException
 import io.legado.app.help.book.BookHelp
 import io.legado.app.help.book.addType
 import io.legado.app.help.book.isLocal
 import io.legado.app.help.book.isLocalModified
+import io.legado.app.help.book.isOnLineTxt
 import io.legado.app.help.book.isType
 import io.legado.app.help.book.removeType
 import io.legado.app.help.config.AppConfig
@@ -35,8 +40,11 @@ import io.legado.app.model.ReadBook
 import io.legado.app.model.localBook.LocalBook
 import io.legado.app.model.webBook.WebBook
 import io.legado.app.ui.book.read.page.provider.ChapterProvider
+import io.legado.app.ui.login.SourceLoginJsExtensions
 import io.legado.app.utils.dpToPx
 import io.legado.app.utils.putPrefInt
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import splitties.init.appCtx
 import java.util.Date
 import kotlin.coroutines.cancellation.CancellationException
@@ -460,9 +468,53 @@ internal object ReaderEngineImpl : ReaderEngine {
 
     // ---- 图片动作 ----
 
-    // dispatchImageAction 保持默认无操作：本宿主引擎图片列无 click 选项
-    // 解析（ImageColumn 仅地址），无段评查看的 JS 桥；槽位 action 恒 null，
-    // 模块侧不参与点按命中——与完整模式「点击图片方式 = 禁用」同现象。
+    /** 图片点击分派防抖（毫秒窗口，对齐宿主完整模式 ReadBookActivity 图点连击间隔）。 */
+    private var lastImageActionAt = 0L
+
+    /**
+     * 图片点击动作分派（[ReaderEngine.dispatchImageAction] 实现）：复刻
+     * 宿主完整模式 `ReadBookActivity.clickImg` 的执行链——书源 JS 上下文
+     * 里求值图片选项的 `click` 脚本，注入 java（SourceLoginJsExtensions）/
+     * book / chapter / result 绑定；脚本通常调 `java.showBrowser` 弹
+     * WebView 弹层（段评半屏评论页）。
+     *
+     * 「点击图片方式」设置语义（AppConfig.clickImgWay）：禁用（3）不分派；
+     * 仅在线书（2）对本地书不分派；其余按单次点击分派——图片查看器（1）
+     * 与双击触发（4）在 E-Ink 无对应交互（模块无图片查看器、无图点双击
+     * 手势），降级为单次点击分派脚本，弹层内容不因此变化。
+     */
+    override fun dispatchImageAction(action: String, source: String) {
+        val now = System.currentTimeMillis()
+        if (now - lastImageActionAt < 300L) return
+        when (AppConfig.clickImgWay) {
+            "3" -> return
+            "2" -> if (ReadBook.book?.isOnLineTxt != true) return
+            else -> Unit
+        }
+        val activity = EInkBridge.hostActivity() ?: return
+        lastImageActionAt = now
+        activity.lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val bookSource = ReadBook.bookSource ?: return@launch
+                val java = SourceLoginJsExtensions(activity, bookSource, BookType.text)
+                val book = ReadBook.book ?: return@launch
+                val chapter = appDb.bookChapterDao.getChapter(
+                    book.bookUrl,
+                    ReadBook.durChapterIndex
+                ) ?: throw NoStackTraceException("no find chapter")
+                runScriptWithContext {
+                    bookSource.evalJS(action) {
+                        put("java", java)
+                        put("book", book)
+                        put("chapter", chapter)
+                        put("result", source)
+                    }
+                }
+            } catch (e: Throwable) {
+                AppLog.put("执行图片链接click键值出错\n${e.localizedMessage}", e, true)
+            }
+        }
+    }
 
     // ---- 触控与页眉页脚 ----
 

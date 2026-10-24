@@ -2,8 +2,15 @@ package io.legado.app.eink
 
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.text.font.FontFamily
 import io.legado.app.constant.PreferKey
 import io.legado.app.eink.bridge.EInkBridge
+import io.legado.app.eink.bridge.EinkAppFonts
+import io.legado.app.eink.bridge.PageTurnEffectEngineImpl
 import io.legado.app.eink.contract.EInkHostActivity
 import io.legado.app.help.config.AppConfig
 import io.legado.app.ui.main.MainActivity
@@ -13,18 +20,61 @@ import io.legado.app.utils.startActivity
 /**
  * E-Ink 版本单 Activity 入口（模块模板基类 [EInkHostActivity] 的宿主子类）。
  *
- * 进入条件：本宿主以 themeMode == "4"（纯净阅读/墨水屏 Compose 模式）
+ * 进入条件：本宿主以 themeMode == "4"（纯净模式/墨水屏 Compose 模式）
  * 分流——MainActivity.onActivityCreated 冷启动分流至此；退出时把
  * themeMode 写回 "0"（跟随系统）并回到 MainActivity。
  *
  * 生命周期编排（引擎装配时机、字体缩放、启动清理、直达最近阅读、
- * 跟随系统深浅色主题、按键分发）全部由基类承担，宿主差异只剩两个钩子：
- * 引擎装配（[EInkBridge]，bridge/ 是移植时唯一需要重写的部分）与
- * 退出出口。
+ * 跟随系统深浅色主题、按键分发）全部由基类承担，宿主差异只剩两个钩子
+ * （引擎装配与退出出口）加可选 UI 字体钩子（[uiFontFamily]，E-Ink
+ * 自管应用字体）。
  */
 class EInkMainActivity : EInkHostActivity() {
 
     override fun onInstallEngines() = EInkBridge.install()
+
+    /**
+     * 挂载为端口弹层的宿主 Activity（段评半屏 WebView 等宿主 DialogFragment
+     * 的事务宿主与生命周期作用域；见 EInkBridge.attachHostActivity）。
+     * 基类 onCreate 为 final 编排，onStart/onStop 是可用的生命周期挂点。
+     */
+    override fun onStart() {
+        super.onStart()
+        EInkBridge.attachHostActivity(this)
+    }
+
+    override fun onStop() {
+        EInkBridge.detachHostActivity(this)
+        super.onStop()
+    }
+
+    // ============ 旋转获取链路验证读数（调试） ============
+    // 入口 Manifest 声明了 orientation|screenSize configChanges（旋转不重建），
+    // 且入口包装冻结 resources.configuration——旋转正确性取决于 Display 实时
+    // 查询。这两个钩子在任何设备（含不支持水波纹的）上可触发，logcat 过滤
+    // TAG「PageTurnRipple」查看；R8 release 剥离 Log，仅 debug/noR8 构建输出。
+    override fun onResume() {
+        super.onResume()
+        PageTurnEffectEngineImpl.debugLogRotation("onResume")
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        PageTurnEffectEngineImpl.debugLogRotation("onConfigurationChanged")
+    }
+
+    /**
+     * E-Ink 界面 UI 字体（E-Ink 自管应用字体，[EinkAppFonts] 私有副本）：
+     * 本宿主完整模式无应用字体设置，字体仅作用于 E-Ink 界面（与 md3
+     * 宿主「完整模式外观字体共享」形态的差异点）。字体文件加载完成前先
+     * 以 null（平台默认）渲染，就位后重组替换；「字体设置」页选择/清除
+     * 经状态流实时生效。
+     */
+    @Composable
+    override fun uiFontFamily(): FontFamily? {
+        val typeface by EinkAppFonts.typeface.collectAsState()
+        return typeface?.let { FontFamily(it) }
+    }
 
     override fun onExitToFullMode(context: Context) {
         // 完整模式（View UI）——导入导出等管理功能在完整模式中完成，
@@ -46,4 +96,3 @@ class EInkMainActivity : EInkHostActivity() {
         super.onDestroy()
     }
 }
-

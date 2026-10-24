@@ -185,6 +185,9 @@ internal object ReaderPageSnapshotMapper {
                                 fullLine = line.isImage,
                                 loader = imageLoader(column.src),
                                 source = column.src,
+                                // 图片选项的 click 脚本原样透传（段评气泡等
+                                // 交互元数据，点按经 dispatchImageAction 分派）
+                                action = column.click,
                             )
                         )
                         position += 1

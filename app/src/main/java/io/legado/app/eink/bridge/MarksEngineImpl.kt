@@ -24,17 +24,17 @@ import kotlin.coroutines.cancellation.CancellationException
  * 书签/笔记 Tab 同端口）。
  *
  * 本宿主存储为 bookmarks 单表，按 bookText 分区——空 = 位置书签
- * （书签 Tab），非空 = 文字锚点书签（笔记 Tab 的划线/想法，与完整模式
- * 「选中文字书签」同一条记录，两模式互通）。
+ * （书签 Tab，eink 快速书签不存摘录、显示字段仅章节名），非空 = 文字
+ * 锚点书签（笔记 Tab 的划线/想法，与完整模式「选中文字书签」同一条
+ * 记录，两模式互通）。
  *
- * 能力声明取舍（单表无判别字段的已知约束）：
- *  - 笔记能力（supportsMarkings = true）：完整链路可用——阅读内划线/
- *    想法保存与状态转换、目录页笔记 Tab、跳转解析、Markdown 导出；
- *  - 书签能力（supportsBookmarks = false）：本宿主书签模型为「选中文字
- *    书签」，无独立页面书签管理面——togglePageBookmark 实现保留但入口
- *    隐藏，目录页不渲染书签 Tab（只剩 目录|笔记 两段）。完整模式的快速
- *    书签（带页摘录、bookText 非空）会归入笔记 Tab 展示为划线卡（单表
- *    无判别字段；跳转/删除均可用）。
+ * 能力声明（对齐 md3 宿主全开）：
+ *  - 笔记能力（supportsMarkings = true）：完整链路——阅读内划线/想法
+ *    保存与状态转换、目录页笔记 Tab、跳转解析、Markdown 导出；
+ *  - 书签能力（supportsBookmarks = true）：阅读内页面书签 toggle
+ *    （下拉书签/顶栏书签钮/页角标）+ 目录页书签 Tab。单表分区的已知
+ *    取舍：完整模式快速书签（带页摘录、bookText 非空）会归入笔记 Tab
+ *    展示为划线卡（跳转/删除均可用；治本需 bookmarks 表加判别列）。
  *
  * 跳转校验为章节标题比对（宿主无源指纹机制）；契约的「本地重定位」
  * 评分机制本宿主未实现——标题不匹配时直接走 NeedConfirm（fallback =
@@ -44,10 +44,6 @@ internal object MarksEngineImpl : MarksEngine {
 
     /** 位置书签判别：bookText 为空 = 快速书签（eink 快速书签不存摘录）。 */
     private fun Bookmark.isPageBookmark() = bookText.isEmpty()
-
-    /** 书签能力：不支持（书签即选中文字书签，笔记 Tab 承载）——书签 Tab/页面书签入口隐藏。 */
-    override val supportsBookmarks: Boolean
-        get() = false
 
     // —— 阅读内：笔记状态机与页面书签 ——
 

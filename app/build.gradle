@@ -213,6 +213,8 @@ dependencies {
     // GlobalSettings 快照状态需 Compose runtime（契约零图片框架类型，
     // Coil 无需宿主自备——模块经自有版本目录携带）
     implementation libs.compose.runtime
+    // eink 应用字体钩子（uiFontFamily 的 FontFamily 类型所在构件）
+    implementation libs.compose.ui.text
     //compileOnly "com.android.tools.build:gradle:$agp_version"
     //noinspection GradleDependency,GradlePackageUpdate
     //coreLibraryDesugaring('com.android.tools:desugar_jdk_libs_nio:2.0.4')
