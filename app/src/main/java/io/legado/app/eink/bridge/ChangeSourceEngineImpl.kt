@@ -19,6 +19,9 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.cancellation.CancellationException
 
 /** 书源句柄（包装 BookSource）。 */
@@ -35,7 +38,14 @@ internal class SearchResultHandleImpl(val searchBook: SearchBook) : SearchResult
  * 本上游差异：searchBookAwait filter 为三参 (name, author, kind)（kind
  * 不参与匹配，占位忽略）；migrateTo 为两参（无 replaceEnableDefault/
  * chineseConverterType 形参，走宿主默认值）；getChapterListAwait 返回
- * Result；历史换源记录经 searchBookDao.changeSourceByGroup 读取。
+ * Result；历史换源记录经 searchBookDao.changeSourceByGroup 读写。
+ *
+ * 缓存维护（对齐宿主 ChangeBookSourceViewModel 语义，非只读消费）：
+ *  - 读：cachedSourceBooks = 宿主换源 initData 同一条查询；
+ *  - 写：searchSourceBook 逐源落库（REPLACE）= 宿主 searchSuccess 的
+ *    边搜边存，与完整模式换源/搜索页共享同一份记录；
+ *  - 重建：新搜索会话（enabledSources 标记，模块每会话起始调用一次）
+ *    先删该书当前展示口径的旧记录 = 宿主 startSearch 的先删后搜。
  */
 internal object ChangeSourceEngineImpl : ChangeSourceEngine {
 
@@ -65,6 +75,35 @@ internal object ChangeSourceEngineImpl : ChangeSourceEngine {
             .mapNotNull { it.getBookSource() }
             .filter { !it.bookSourceUrl.isBlank() }
             .map { SourceHandleImpl(it) }
+            .also {
+                // 模块换源 VM 于每次搜索会话起始调用本方法（随后才并发逐源
+                // searchSourceBook）——标记下一次 searchSourceBook 为新会话
+                // 首源，承接宿主 startSearch 的「先删当前展示记录」步骤
+                pendingSessionReset.set(true)
+            }
+
+    /**
+     * 新搜索会话的重建步骤（对齐宿主 ChangeBookSourceViewModel.startSearch）：
+     * 删掉该书当前展示口径的历史搜索记录——与 [cachedSourceBooks] 同一条
+     * changeSourceByGroup 查询（宿主删的就是它的展示列表），随后逐源
+     * 落库的新记录自然重建。会话标记经 [sessionStartMutex] 原子消费：
+     * 删除完成后才放行并发搜索，保证所有落库都晚于删除。
+     */
+    private val sessionStartMutex = Mutex()
+    private val pendingSessionReset = AtomicBoolean(false)
+
+    private suspend fun beginSessionIfNeeded(name: String, author: String, checkAuthor: Boolean) {
+        sessionStartMutex.withLock {
+            if (pendingSessionReset.getAndSet(false)) {
+                val matchAuthor =
+                    if (checkAuthor) author.replace(AppPattern.authorRegex, "") else ""
+                val stale = appDb.searchBookDao.changeSourceByGroup(name, matchAuthor, "")
+                if (stale.isNotEmpty()) {
+                    appDb.searchBookDao.delete(*stale.toTypedArray())
+                }
+            }
+        }
+    }
 
     /**
      * 该书名的历史换源搜索记录（宿主换源 initData 同语义）：只含当前
@@ -97,16 +136,24 @@ internal object ChangeSourceEngineImpl : ChangeSourceEngine {
         author: String,
         checkAuthor: Boolean,
     ): List<ChangeSourceResultUiModel> {
+        beginSessionIfNeeded(name, author, checkAuthor)
         val bookSource = (source as SourceHandleImpl).source
         val strippedAuthor = author.replace(AppPattern.authorRegex, "")
-        return WebBook.searchBookAwait(
+        val searchBooks = WebBook.searchBookAwait(
             bookSource,
             name,
             filter = { fName, fAuthor, _ ->
                 fName == name && (!checkAuthor || fAuthor.contains(strippedAuthor))
             }
-        ).map { searchBook ->
+        ).onEach { searchBook ->
             searchBook.releaseHtmlData()
+        }
+        // 逐源结果落库（REPLACE）——对齐宿主 searchSuccess 的边搜边存，
+        // 作为下次进入换源页的历史缓存，与完整模式换源/搜索页共享同一份
+        if (searchBooks.isNotEmpty()) {
+            appDb.searchBookDao.insert(*searchBooks.toTypedArray())
+        }
+        return searchBooks.map { searchBook ->
             ChangeSourceResultUiModel(
                 handle = SearchResultHandleImpl(searchBook),
                 bookUrl = searchBook.bookUrl,
