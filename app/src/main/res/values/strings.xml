@@ -1861,4 +1861,7 @@
     <string name="content_search_scope_up">From here up</string>
     <string name="content_search_anchor_unavailable">The reading position could not be located after text processing. Return to the reader and try again, or choose Whole book.</string>
     <string name="content_search_result_unavailable">This result could not be located reliably in the displayed text. Check text replacement and title settings, then search again.</string>
+
+    <!-- E-Ink 纯净模式（书架筛选菜单「无筛选」行名称） -->
+    <string name="eink_shelf_filter_none">No filter</string>
 </resources>

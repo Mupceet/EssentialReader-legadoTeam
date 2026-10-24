@@ -19,6 +19,7 @@
         <item>亮色主題</item>
         <item>暗色主題</item>
         <item>E-Ink(墨水螢幕)</item>
+        <item>純淨模式(墨水螢幕)</item>
     </string-array>
 
     <string-array name="NavBarColors">

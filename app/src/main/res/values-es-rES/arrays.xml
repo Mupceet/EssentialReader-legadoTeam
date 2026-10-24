@@ -38,6 +38,7 @@
 		<item>Tema Claro</item>
 		<item>Tema Oscuro</item>
 		<item>Tema E-Ink</item>
+		<item>Modo E-Ink Compose</item>
 	</string-array>
 
 	<string-array name="NavBarColors">

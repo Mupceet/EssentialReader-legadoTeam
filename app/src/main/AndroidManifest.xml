@@ -135,6 +135,11 @@
             android:exported="true"
             android:launchMode="singleTask"
             android:windowSoftInputMode="adjustResize" />
+        <!-- E-Ink 墨水屏纯净界面（themeMode "4" 时 MainActivity 分流进入） -->
+        <activity
+            android:name=".eink.EInkMainActivity"
+            android:configChanges="locale|layoutDirection|orientation|screenSize|smallestScreenSize|screenLayout|uiMode"
+            android:windowSoftInputMode="adjustResize" />
         <!-- 阅读界面 -->
         <activity
             android:name=".ui.book.read.ReadBookActivity"

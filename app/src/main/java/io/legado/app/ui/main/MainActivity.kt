@@ -66,6 +66,7 @@ import io.legado.app.utils.getClipText
 import io.legado.app.utils.isCreated
 import io.legado.app.utils.imeHeight
 import io.legado.app.utils.navigationBarHeight
+import io.legado.app.utils.startActivity
 import io.legado.app.utils.observeEvent
 import io.legado.app.utils.setEdgeEffectColor
 import io.legado.app.utils.setOnApplyWindowInsetsListenerCompat
@@ -120,6 +121,13 @@ class MainActivity : VMBaseActivity<ActivityMainBinding, MainViewModel>(),
     private var passphraseReadGeneration = 0
 
     override fun onActivityCreated(savedInstanceState: Bundle?) {
+        // 墨水屏 Compose 纯净模式（themeMode "4"）分流：接管界面，退出由
+        // E-Ink 内「退出到完整模式」写回 "0" 并 CLEAR_TASK 回本页
+        if (AppConfig.themeMode == "4") {
+            startActivity<io.legado.app.eink.EInkMainActivity>()
+            finish()
+            return
+        }
         upBottomMenu()
         initView()
         upHomePage()

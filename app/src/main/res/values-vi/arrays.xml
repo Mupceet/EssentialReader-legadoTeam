@@ -26,6 +26,7 @@
         <item>Chế độ sáng</item>
         <item>Chế độ tối</item>
         <item>Chế độ E-Ink</item>
+        <item>Chế độ E-Ink Compose</item>
     </string-array>
 
     <string-array name="NavBarColors">

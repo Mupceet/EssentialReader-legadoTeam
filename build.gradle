@@ -33,6 +33,27 @@ plugins {
     alias libs.plugins.download apply false
 }
 
+// eink 模块（AGP<9 变体）字节码目标与本仓构建栈对齐：模块变体钉
+// Java 17 + JDK 21 工具链，而本仓 Kotlin 2.4 的 KGP 默认 JVM 目标随
+// 工具链取 21，触发 Java/Kotlin 目标一致性检查。源码嵌入形态字节码
+// 目标随宿主口径（EINK-PORTING.md §0），此处将模块 Kotlin 输出显式
+// 对齐其 Java 17（模块保守档地板，D8 消解无碍）。
+project(':modules:eink') {
+    pluginManager.withPlugin('com.android.library') {
+        dependencies {
+            // eink-lib 89e24bddc 的 AGP<9 变体（build-agp8.gradle.kts）漏同步
+            // Hanvon 清理免疫钩子的 vendored Xposed API（AGP9 形态已有此行）；
+            // 宿主侧代补 compileOnly——上游变体补齐后可移除
+            compileOnly(files('libs/xposed-api-82.jar'))
+        }
+    }
+    tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+        compilerOptions {
+            jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        }
+    }
+}
+
 tasks.register('clean', Delete) {
     delete rootProject.layout.buildDirectory
 }

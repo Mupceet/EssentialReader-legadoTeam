@@ -207,6 +207,12 @@ android {
 }
 
 dependencies {
+    // E-Ink 模块源码集成：git 子模块 eink-lib/（eink/lib 独立分支，AGP<9
+    // 构建变体，见 settings.gradle）；升级＝推进子模块指针后提交。
+    implementation project(':modules:eink')
+    // GlobalSettings 快照状态需 Compose runtime（契约零图片框架类型，
+    // Coil 无需宿主自备——模块经自有版本目录携带）
+    implementation libs.compose.runtime
     //compileOnly "com.android.tools.build:gradle:$agp_version"
     //noinspection GradleDependency,GradlePackageUpdate
     //coreLibraryDesugaring('com.android.tools:desugar_jdk_libs_nio:2.0.4')

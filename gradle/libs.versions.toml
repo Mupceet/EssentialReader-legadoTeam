@@ -50,6 +50,10 @@ pdfbox-android = "2.0.27.0"
 #noinspection NewerVersionAvailable
 protobufJavalite = "3.25.9"
 
+# eink 模块接入（GlobalSettings 快照状态需 Compose runtime）；1.9.4 与模块
+# 保守档同线（eink-lib/modules/eink/gradle/libs.versions.toml，EINK-PORTING §0）
+composeRuntime = "1.9.4"
+
 # issue #3811，不要更新版本，新版引入了一个破坏性变更（详见https://github.com/jhy/jsoup/pull/2017）
 # 若要升级请确保相关代码不会受此变更影响（如AnalyzeByJSoup.kt、JsoupXpath库等）
 #noinspection NewerVersionAvailable
@@ -165,6 +169,8 @@ glide-recyclerview = { module = "com.github.bumptech.glide:recyclerview-integrat
 glide-compiler = { module = "com.github.bumptech.glide:compiler", version.ref = "glide" }
 glide-compose = { module = "com.github.bumptech.glide:compose", version = "1.0.0-beta08" }
 glide-ksp = { module = "com.github.bumptech.glide:ksp", version.ref = "glide" }
+# eink 模块快照状态所需（契约零图片框架类型，Coil 无需宿主自备——模块经自有版本目录携带）
+compose-runtime = { module = "androidx.compose.runtime:runtime", version.ref = "composeRuntime" }
 glide-avif = { module = "com.github.bumptech.glide:avif-integration", version.ref = "glide" }
 avif = { module = "org.aomedia.avif.android:avif", version = "1.1.1.14d8e3c4" }
 glide-svg = { module = "com.github.qoqa:glide-svg", version = "4.0.2" }
@@ -235,6 +241,8 @@ kotlin-noarg = { id = "org.jetbrains.kotlin.plugin.noarg", version.ref = "kotlin
 kotlin-sam = { id = "org.jetbrains.kotlin.plugin.sam.with.receiver", version.ref = "kotlin" }
 kotlin-lombok = { id = "org.jetbrains.kotlin.plugin.lombok", version.ref = "kotlin" }
 kotlin-parcelize = { id = "org.jetbrains.kotlin.plugin.parcelize", version.ref = "kotlin" }
+# eink 模块源码集成所需（版本必须与本仓 Kotlin 完全一致）
+compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 
 google-services = { id = "com.google.gms.google-services", version = "4.4.4" }
 
