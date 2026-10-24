@@ -35,6 +35,7 @@ private const val KEY_STYLE_SHOW_LATEST = "einkBookshelfShowLatestChapter"
 private const val KEY_STYLE_GRID_LAYOUT = "einkBookshelfGridLayout"
 private const val KEY_STYLE_GRID_COVER_WIDTH = "einkBookshelfGridCoverWidth"
 private const val KEY_STYLE_TITLE_MAX_LINES = "einkBookshelfTitleMaxLines"
+private const val KEY_STYLE_GROUPS_ENABLED = "einkBookshelfGroupsEnabled"
 
 /** [Book] → [BookshelfItemUiModel]：条目渲染字段的唯一抽取点（分组端口共用）。 */
 internal fun Book.toBookshelfItemUiModel() = BookshelfItemUiModel(
@@ -60,8 +61,8 @@ internal fun Book.toBookshelfItemUiModel() = BookshelfItemUiModel(
  */
 internal object BookshelfEngineImpl : BookshelfEngine {
 
-    // ---- 显示样式（本宿主差异：六个键中仅 showUnread 有宿主键可转发，
-    // 其余五键为 E-Ink 自有偏好；宿主无 SP 流，跨模式实时联动不承接，
+    // ---- 显示样式（本宿主差异：七个键中仅 showUnread 有宿主键可转发，
+    // 其余六键为 E-Ink 自有偏好；宿主无 SP 流，跨模式实时联动不承接，
     // setStyle 双写状态流与存储即满足「实时档」契约） ----
 
     private val styleState = MutableStateFlow(readStyleSnapshot())
@@ -70,6 +71,8 @@ internal object BookshelfEngineImpl : BookshelfEngine {
         showUnreadBadge = AppConfig.showUnread,
         highlightNewChapter = einkPrefBoolean(KEY_STYLE_HIGHLIGHT_NEW, true),
         showLatestChapter = einkPrefBoolean(KEY_STYLE_SHOW_LATEST, true),
+        // 分组展示支持开关：契约默认关（顶层平铺），E-Ink 自有键持久化
+        groupsEnabled = einkPrefBoolean(KEY_STYLE_GROUPS_ENABLED, false),
         isGridLayout = einkPrefBoolean(KEY_STYLE_GRID_LAYOUT, true),
         gridCoverWidth = einkPrefInt(KEY_STYLE_GRID_COVER_WIDTH, 120).coerceAtLeast(1),
         titleMaxLines = einkPrefInt(KEY_STYLE_TITLE_MAX_LINES, 2).coerceIn(1, 5),
@@ -80,10 +83,11 @@ internal object BookshelfEngineImpl : BookshelfEngine {
     override suspend fun setStyle(style: BookshelfStyle) {
         styleState.value = style
         // 未读角标转发宿主键（完整模式共享，setter 自带落盘）；
-        // 其余五键落 E-Ink 专属 prefs
+        // 其余六键落 E-Ink 专属 prefs
         AppConfig.showUnread = style.showUnreadBadge
         einkPrefPutBoolean(KEY_STYLE_HIGHLIGHT_NEW, style.highlightNewChapter)
         einkPrefPutBoolean(KEY_STYLE_SHOW_LATEST, style.showLatestChapter)
+        einkPrefPutBoolean(KEY_STYLE_GROUPS_ENABLED, style.groupsEnabled)
         einkPrefPutBoolean(KEY_STYLE_GRID_LAYOUT, style.isGridLayout)
         einkPrefPutInt(KEY_STYLE_GRID_COVER_WIDTH, style.gridCoverWidth)
         einkPrefPutInt(KEY_STYLE_TITLE_MAX_LINES, style.titleMaxLines)
