@@ -53,6 +53,10 @@ internal object ChangeSourceEngineImpl : ChangeSourceEngine {
             name = book.name,
             author = book.author,
             origin = book.origin,
+            // 常驻首项「当前源」行展示：书源显示名快照与已缓存最新章节
+            //（originName 留空会使该行回落显示 origin URL）
+            originName = book.originName,
+            latestChapterTitle = book.latestChapterTitle,
         )
     }
 
