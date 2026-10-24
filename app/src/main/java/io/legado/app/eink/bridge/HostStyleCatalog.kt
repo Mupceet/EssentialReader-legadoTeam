@@ -9,16 +9,15 @@ import io.legado.app.eink.contract.ReaderStyleParamIds as Ids
  * 能力逐参数声明（值域/默认值与宿主默认一致），模块据此呈现设置行。
  *
  * 本宿主能力边界（不可用参数直接不进目录，模块隐藏对应设置项）：
- *  - 标题/页眉无独立字体与字重（引擎单字体 + textBold 全局粗细）；
+ *  - 标题/页眉无独立字体（引擎单字体 + titleBold/textBold 独立字重键）；
  *  - 标题行距、页眉/页脚字号无配置键；
  *  - 标题字号为「正文 + 增量」模型（引擎 titlePaint = textSize+titleSize），
  *    契约 TITLE_SIZE 的绝对值在 applyStyle/currentStyle 映射期换算；
- *  - 正文字重仅 0 常规/1 粗/2 细三预设（引擎 getPaints）——Presets 档
- *    声明（无自定义滑条；若有自定义值进入 applyStyle 就近量化兜底）。
+ *  - 正文/标题字重均仅 0 常规/1 粗/2 细三预设（引擎 getPaints）——
+ *    Presets 档声明（无自定义滑条；若有自定义值进入 applyStyle 就近
+ *    量化兜底）。标题字重的「跟随正文」态（titleBold=-1）按引擎语义
+ *    在快照期折算等效档，编辑写入即独立生效。
  *
- * 契约改进已落地（模块 0.6.0）：设置弹层行按目录守卫——本宿主未声明
- * HEADER_SIZE/FOOTER_SIZE（页眉页脚字号行隐藏）与 TITLE_WEIGHT（标题
- * 字重行隐藏；引擎单键耦合无独立标题字重键，直接声明不支持）。
  * 页眉/页脚字号渲染为锁死档（预留带推导 ≈ 12sp，对齐完整模式）。
  *
  * affectsLayout 判定：本宿主 visibleHeight = viewHeight - 上下边距（含
@@ -43,6 +42,14 @@ internal object HostStyleCatalog {
                 available = true,
                 affectsLayout = true,
                 default = 0,
+            ),
+            // 标题字重：引擎独立 titleBold 键（-1 跟随正文 / 0 常规 / 1 粗 /
+            // 2 细）——预设档声明；默认粗对齐引擎默认（跟随正文态的等效档）
+            ReaderStyleParam.Presets(
+                id = Ids.TITLE_WEIGHT,
+                available = true,
+                affectsLayout = true,
+                default = 1,
             ),
             ReaderStyleParam.Choice(
                 id = Ids.TITLE_MODE,

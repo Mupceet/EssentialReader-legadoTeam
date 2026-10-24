@@ -413,9 +413,10 @@ internal object ReaderEngineImpl : ReaderEngine {
         // ---- 协商扩展参数：null = 不跨桥写（保持宿主值） ----
         style.bodyFont?.let(::applyBodyFont)
         style.bodyWeight?.let { ReadBookConfig.textBold = quantizeWeight(it) }
-        // 标题字重不映射：引擎 textBold 单键同时决定标题/正文画笔（无独立
-        // 标题字重键），联合映射会在冲突组合下让正文档失真——保持正文
-        // 单键语义，标题字重行为完整模式同款副作用
+        // 标题字重：本宿主引擎有独立 titleBold 键（-1 跟随正文 / 0 常规 /
+        // 1 粗 / 2 细，getPaints 独立消费）——预设档直传；写入即脱离
+        // 「跟随正文」态（-1 仅完整模式语义可达，此后标题字重独立生效）
+        style.titleWeight?.let { ReadBookConfig.titleBold = quantizeWeight(it) }
         style.titleMode?.let { ReadBookConfig.titleMode = it }
         // 引擎标题字号 = textSize + titleSize（增量模型）：契约绝对值换算
         style.titleSize?.let { ReadBookConfig.titleSize = it - style.textSize }
@@ -655,6 +656,13 @@ private fun ReadBookConfig.snapshotStyle(): ReaderTextStyle = ReaderTextStyle(
     footerPaddingBottom = durConfig.footerPaddingBottom,
     bodyFont = currentBodyFont(),
     bodyWeight = textBold,
+    // 标题字重读回：-1（跟随正文）按 getPaints 语义折算等效预设档
+    //（textBold 细体档标题为常规，否则标题默认加粗），显式 0/1/2 直传
+    titleWeight = when (titleBold) {
+        0, 1, 2 -> titleBold
+        // -1 跟随正文：textBold=2 时标题随常规、其余随粗
+        else -> if (textBold == 2) 0 else 1
+    },
     titleMode = titleMode,
     // 引擎增量模型读回为绝对值
     titleSize = textSize + titleSize,
