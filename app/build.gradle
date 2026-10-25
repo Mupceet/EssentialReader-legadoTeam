@@ -12,6 +12,11 @@ plugins {
     alias libs.plugins.room
     alias libs.plugins.ksp
     alias libs.plugins.google.services
+    // eink 入口子类的 uiFontFamily 覆写为 @Composable（基类契约钩子）：
+    // 无本插件时覆写编译为无 Composer 参数的重载（虚分派失效成死代码，
+    // 全局字体静默无效——dexdump 实证）。app 本身不组合 Compose UI，
+    // 仅为覆写签名一致性应用
+    alias libs.plugins.compose.compiler
 }
 apply from: 'download.gradle'
 apply from: 'cronet-loader.gradle'

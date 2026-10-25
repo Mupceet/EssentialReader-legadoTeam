@@ -6,6 +6,8 @@ import android.content.res.Configuration
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import io.legado.app.constant.PreferKey
 import io.legado.app.eink.bridge.EInkBridge
@@ -66,14 +68,22 @@ class EInkMainActivity : EInkHostActivity() {
     /**
      * E-Ink 界面 UI 字体（E-Ink 自管应用字体，[EinkAppFonts] 私有副本）：
      * 本宿主完整模式无应用字体设置，字体仅作用于 E-Ink 界面（与 md3
-     * 宿主「完整模式外观字体共享」形态的差异点）。字体文件加载完成前先
-     * 以 null（平台默认）渲染，就位后重组替换；「字体设置」页选择/清除
-     * 经状态流实时生效。
+     * 宿主「完整模式外观字体共享」形态的差异点）。
+     *
+     * 按契约 EInkHostActivity.uiFontFamily KDoc 口径消费：单 Normal 声明
+     * 的 FontList（FontFamily(Font(file))）——Bold 请求经平台
+     * Typeface.create 合成假粗；FontFamily(typeface) 直包会使排版系统
+     * 12 个 Bold 样式静默降为 Regular。副本路径就位/变更时重组替换；
+     * 「字体设置」页选择/清除经状态流实时生效。
      */
     @Composable
     override fun uiFontFamily(): FontFamily? {
-        val typeface by EinkAppFonts.typeface.collectAsState()
-        return typeface?.let { FontFamily(it) }
+        val path by EinkAppFonts.activeFontPath.collectAsState()
+        return path?.let { remembered ->
+            remember(remembered) {
+                FontFamily(Font(java.io.File(remembered)))
+            }
+        }
     }
 
     override fun onExitToFullMode(context: Context) {

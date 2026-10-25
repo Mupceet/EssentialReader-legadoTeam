@@ -126,26 +126,28 @@ object EInkBridge {
 
 /**
  * E-Ink 应用字体（界面字体）状态：本宿主完整模式无应用字体概念，
- * E-Ink 自管——源字体复制入私有目录，[android.graphics.Typeface] 进程
- * 级缓存，状态流驱动组合侧重组（[io.legado.app.eink.EinkMainActivity]
- * 的 uiFontFamily 钩子订阅）。仅作用于 E-Ink 界面（KDoc 明示范围，
- * 与 md3 宿主「完整模式外观字体共享」形态的差异点）。
+ * E-Ink 自管——源字体复制入私有目录，状态流发**已验证可加载的副本路径**
+ * （Typeface 预载校验），入口 uiFontFamily 钩子按 md3 参照形态
+ * `FontFamily(Font(file))` 消费（单 Normal 声明的 FontList——Bold 请求
+ * 经平台 Typeface.create 合成假粗，直包 Typeface 会使 Bold 静默降级）。
+ * 仅作用于 E-Ink 界面（与 md3「完整模式外观字体共享」形态的差异点）。
  */
 internal object EinkAppFonts {
 
     /** 应用字体私有副本目录（filesDir/eink_fonts/）。 */
     internal val fontDir get() = java.io.File(appCtx.filesDir, "eink_fonts")
 
-    private val state = MutableStateFlow<android.graphics.Typeface?>(null)
+    private val state = MutableStateFlow<String?>(null)
 
-    /** 当前生效字体（null = 未设置/加载失败，平台默认）。 */
-    val typeface: kotlinx.coroutines.flow.StateFlow<android.graphics.Typeface?> = state
+    /** 当前生效的副本路径（null = 未设置/校验失败，平台默认）。 */
+    val activeFontPath: kotlinx.coroutines.flow.StateFlow<String?> = state
 
     /** 按偏好记录重载副本（install 与每次 set/clear 后调用）。 */
     fun reload() {
         val copyPath = einkSharedPreferences().getString(KEY_APP_FONT_COPY, null)
-        state.value = copyPath?.let { path ->
-            runCatching { android.graphics.Typeface.createFromFile(path) }.getOrNull()
+        // 预载校验：非法字体文件（复制损坏/非字体）回落平台默认
+        state.value = copyPath?.takeIf { path ->
+            runCatching { android.graphics.Typeface.createFromFile(path) }.isSuccess
         }
     }
 
