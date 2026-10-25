@@ -63,7 +63,9 @@ object AppUpdateEngineImpl : AppUpdateEngine {
     override fun startDownload(update: AppUpdateInfo) {
         if (update.downloadUrl.isBlank() || update.fileName.isBlank()) return
         _downloadProgress.value = null
-        Download.start(appCtx, update.downloadUrl, update.fileName)
+        // isAppUpdate 与完整模式关于页同口径：完成通知走更新文案，
+        // 失败通知的重试动作按更新语义带回下载地址
+        Download.start(appCtx, update.downloadUrl, update.fileName, isAppUpdate = true)
         progressJob?.cancel()
         progressJob = checkScope.launch {
             pollDownloadProgress(update.downloadUrl)
