@@ -1,0 +1,18 @@
+{
+  "tag_name": "3.26102510",
+  "name": "moben-legado_3.26102510",
+  "body": "首个正式版 · EssentialReader-legadoTeam（墨本 legado）\n\n基于 LegadoTeam/legado 上游主线，集成 EssentialReader 家族 E-Ink Compose 纯净阅读模式（eink-lib 0.7.x 契约 v2）：\n\n- 完整模式主题设置新增「纯净模式(墨水屏)」——一键切换 Compose 墨水屏界面，书架/搜索/详情/目录/换源/阅读全链路\n- 阅读：排版调参即时重排（字号/边距/行距/标题字重等）、划线与想法（笔记 Tab 统一承载）、段评气泡、点击区域九宫格\n- 书架：分组文件夹/筛选器双视图、封面与完整模式共享磁盘缓存、换源历史缓存免重搜\n- 备份与恢复（WebDAV 配置/测试/恢复）、应用字体与标题字重设置、全局界面字体\n- 更新检查与下载经镜像加速，国内网络可用性友好",
+  "prerelease": false,
+  "assets": [
+    {
+      "browser_download_url": "https://github.com/Mupceet/EssentialReader-legadoTeam/releases/download/3.26102510/moben-legado_3.26102510_universal_vc38538.apk",
+      "content_type": "application/vnd.android.package-archive",
+      "created_at": "2026-10-25T02:12:20Z",
+      "download_count": 0,
+      "id": 673860426,
+      "name": "moben-legado_3.26102510_universal_vc38538.apk",
+      "size": 29125401,
+      "state": "uploaded"
+    }
+  ]
+}
