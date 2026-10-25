@@ -3,6 +3,8 @@
     <!--App-->
     <string name="app_name">Legado</string>
     <string name="app_name_a">Legado·A</string>
+    <!-- 正式发布版应用名（阅读·D 同款间隔号形式）；品牌名不分语言，单一定义 -->
+    <string name="app_name_moben" translatable="false">阅读·墨本</string>
     <string name="app_name_s" translatable="false">LegadoPlus</string>
     <string name="receiving_shared_label">Legado·search</string>
     <string name="receiving_shared_import_label">Legado·import</string>

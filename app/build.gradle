@@ -121,7 +121,9 @@ android {
             if (getApplicationIdSuffix() == '.releaseA') {
                 manifestPlaceholders.put("app_name", "@string/app_name_a")
             } else {
-                manifestPlaceholders.put("app_name", "@string/app_name")
+                // 正式发布版应用名：阅读·墨本（阅读·D 同款间隔号形式；
+                // debug 仍为「阅读」，双包共存桌面可区分）
+                manifestPlaceholders.put("app_name", "@string/app_name_moben")
             }
 
             minifyEnabled true
