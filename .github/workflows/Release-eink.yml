@@ -95,7 +95,8 @@ jobs:
             echo "RELEASE_STORE_PASSWORD=${{ secrets.RELEASE_STORE_PASSWORD }}"
             echo "RELEASE_STORE_FILE=./release-key.jks"
           } >> $GITHUB_WORKSPACE/gradle.properties
-          echo "${{ secrets.RELEASE_KEY_STORE }}" | base64 --decode > $GITHUB_WORKSPACE/release-key.jks
+          # signingConfigs 的 file() 相对 app 模块目录解析——keystore 落 app/
+          echo "${{ secrets.RELEASE_KEY_STORE }}" | base64 --decode > $GITHUB_WORKSPACE/app/release-key.jks
 
       - name: Build Universal APK
         run: |
