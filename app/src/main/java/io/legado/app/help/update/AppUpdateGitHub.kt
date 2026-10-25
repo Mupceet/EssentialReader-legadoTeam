@@ -11,8 +11,12 @@ import io.legado.app.help.http.okHttpClient
 import io.legado.app.help.http.text
 import io.legado.app.utils.GSON
 import io.legado.app.utils.fromJsonArray
+import io.legado.app.utils.fromJsonObject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.withTimeoutOrNull
 import splitties.init.appCtx
+import kotlin.time.Duration.Companion.milliseconds
 
 @Keep
 @Suppress("unused")
@@ -25,6 +29,13 @@ object AppUpdateGitHub : AppUpdate.AppUpdateInterface {
      * 约定见 AppReleaseInfo 解析：文件名不得含 "release" 字样（否则被
      * 推断为 beta 变体）、tag 取 3.yyMMddHH 版本、文件名带 vc<versionCode>
      * 段保证版本比较稳定。
+     *
+     * 检查链路（墨本 md3 同构）：manifest 优先——发版流水线把 release
+     * JSON 投影到 update-manifests 分支的 official.json（GithubRelease
+     * 同构），raw.githubusercontent 经 [UpdateAccelerator] 加速取小文件，
+     * 失败回退直连再回退 GitHub API；API 兜底恒直连（公共代理出口 IP
+     * 共享 GitHub 按 IP 的 API 限流额度，改写会放大 403/429）。下载
+     * 直链经 [UpdateAccelerator.resolveDownloadUrl] 探测改写。
      */
     private const val repoPath = "Mupceet/EssentialReader-legadoTeam"
 
@@ -34,11 +45,58 @@ object AppUpdateGitHub : AppUpdate.AppUpdateInterface {
     private val betaTagUrl =
         "https://api.github.com/repos/$repoPath/releases/tags/beta"
 
+    private val updateManifestBaseUrl =
+        "https://raw.githubusercontent.com/$repoPath/update-manifests"
+
+    private const val manifestTimeoutMillis = 2500L
+
     private val checkVariant: AppVariant
         get() = AppConst.appInfo.appVariant.takeUnless { it == AppVariant.UNKNOWN }
             ?: AppVariant.OFFICIAL
 
     private suspend fun getLatestRelease(): List<AppReleaseInfo> {
+        // manifest 命中时 API 兜底失败不拖垮检查（国内 API 直连不可达是
+        // 常态）；两路皆空才报获取失败
+        val manifest = listOfNotNull(getManifestRelease())
+        val apiReleases = runCatching { getApiReleases() }.getOrDefault(emptyList())
+        val releases = manifest + apiReleases
+        if (releases.isEmpty()) {
+            throw NoStackTraceException("获取新版本出错")
+        }
+        return releases
+            .flatMap { it.gitReleaseToAppReleaseInfo() }
+            .sortedByDescending { it.createdAt }
+    }
+
+    /** manifest 单文件通道：加速 → 直连各一次，失败交回 API 兜底。 */
+    private suspend fun getManifestRelease(): GithubRelease? {
+        val manifestUrl = "$updateManifestBaseUrl/official.json"
+        return fetchManifestRelease(UpdateAccelerator.accelerate(manifestUrl))
+            ?: fetchManifestRelease(manifestUrl)
+    }
+
+    private suspend fun fetchManifestRelease(url: String): GithubRelease? {
+        return try {
+            withTimeoutOrNull(manifestTimeoutMillis.milliseconds) {
+                val response = okHttpClient.newCallResponse { url(url) }
+                response.use {
+                    if (!it.isSuccessful) return@withTimeoutOrNull null
+                    val release = GSON.fromJsonObject<GithubRelease>(it.body.text()).getOrNull()
+                        ?: return@withTimeoutOrNull null
+                    // 官方通道契约：非 pre-release 且至少一个有效 APK 资产
+                    release.takeIf {
+                        !it.isPreRelease && it.assets.orEmpty().any { asset -> asset.isValid }
+                    }
+                }
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private suspend fun getApiReleases(): List<GithubRelease> {
         val res = okHttpClient.newCallResponse {
             url(releasesUrl)
         }
@@ -52,10 +110,7 @@ object AppUpdateGitHub : AppUpdate.AppUpdateInterface {
         val releases = GSON.fromJsonArray<GithubRelease>(body).getOrElse {
                 throw NoStackTraceException("获取新版本出错 " + it.localizedMessage)
         }
-        return releases
-            .filterNot { it.isPreRelease }
-            .flatMap { it.gitReleaseToAppReleaseInfo() }
-            .sortedByDescending { it.createdAt }
+        return releases.filterNot { it.isPreRelease }
     }
 
     private suspend fun getBetaRelease(): List<AppReleaseInfo> {
@@ -121,22 +176,17 @@ object AppUpdateGitHub : AppUpdate.AppUpdateInterface {
     }
 }
 
-internal fun AppReleaseInfo.toUpdateInfo(isBeta: Boolean = false): AppUpdate.UpdateInfo {
-    val primaryUrl = if (isBeta) downloadUrl else resolveAppUpdateDownloadUrl(name, downloadUrl)
-    val mirrorUrl = if (isBeta) null else resolveAppUpdateMirrorUrl(name, primaryUrl)
-    val alternateMirrorUrl = if (isBeta) {
-        null
-    } else {
-        resolveAppUpdateAlternateMirrorUrl(name, primaryUrl, mirrorUrl)
-    }
+internal suspend fun AppReleaseInfo.toUpdateInfo(isBeta: Boolean = false): AppUpdate.UpdateInfo {
+    // 下载直链：加速源可达则前缀改写（Range 0-0 探测），不可达回退
+    // GitHub 原文；本发行版无上游 CDN 分发网，镜像位恒空
+    val primaryUrl = UpdateAccelerator.resolveDownloadUrl(downloadUrl)
     return AppUpdate.UpdateInfo(
         tagName = versionName,
         updateLog = note,
         downloadUrl = primaryUrl,
         fileName = name,
-        backupDownloadUrl = if (isBeta) null else resolveAppUpdateBackupUrl(primaryUrl, downloadUrl),
-        mirrorDownloadUrl = mirrorUrl,
-        alternateMirrorDownloadUrl = alternateMirrorUrl,
+        mirrorDownloadUrl = null,
+        alternateMirrorDownloadUrl = null,
         size = size,
         createdAt = createdAt,
         isBeta = isBeta

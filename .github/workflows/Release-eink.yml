@@ -159,3 +159,13 @@ jobs:
           replacesArtifacts: true
           artifactErrorsFailBuild: true
           artifacts: apk/*.apk
+
+      # 更新检查加速链路（墨本 md3 同构）：release JSON 投影到
+      # update-manifests 分支的 official.json——应用端 manifest 优先经
+      # gh-proxy 加速拉取小文件（raw.githubusercontent 国内直连不可达是
+      # 常态），GitHub API 直连兜底
+      - name: Publish Update Manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bash .github/scripts/publish-update-manifest.sh "$VERSION"
