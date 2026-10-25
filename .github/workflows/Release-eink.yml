@@ -1,0 +1,163 @@
+name: Release E-Ink
+
+# EssentialReader-legadoTeam 正式版发版流水线（仅正式版，无 beta 通道）
+#
+# 与上游发版流水线的适配差异（保持本文件独立，merge 上游零冲突）：
+#  1. checkout 带 submodules: recursive——构建依赖 eink-lib 子模块
+#     （settings.gradle 挂载 eink-lib/modules/eink，上游流水线均无子模块感知）；
+#  2. 无分支门控：纯手动 dispatch（默认分支 eink/port 即可选）；
+#  3. 签名 secrets 全参数化（RELEASE_KEY_STORE 为 keystore 的 base64，
+#     RELEASE_KEY_ALIAS/PASSWORD/STORE_PASSWORD）；
+#  4. 单变体：仅 app/release（不做 releaseA 共存、不做 CDN/网盘分发）；
+#  5. 产物命名对齐应用内更新检查的解析规则
+#     （AppReleaseInfo.inferAppVariant / parseAssetVersionCode）：
+#     EssentialReader-legadoTeam_<3.yyMMddHH>[_universal]_vc<versionCode>.apk
+#     —— 文件名不得含 release/releasea 字样（会被推断为 beta 变体，
+#     正式包签名 UNKNOWN→OFFICIAL 回落将永远选不中）；
+#  6. 发布 prerelease: false + makeLatest: true（正式版语义）；
+#  7. versionCode 由 app/build.gradle 的 git rev-list 公式自算
+#     （fetch-depth: 0 必需），APK 命名的 vc 段经 aapt2 从产物提取。
+
+on:
+  workflow_dispatch:
+    inputs:
+      changelog:
+        description: '更新日志（Release 说明，留空用默认文案）'
+        required: false
+        default: ''
+
+concurrency:
+  group: release-eink-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout（含 eink-lib 子模块）
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: 21
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6.4.0
+
+      - name: Check Signing Secrets
+        run: |
+          missing=0
+          for name in RELEASE_KEY_STORE RELEASE_KEY_ALIAS RELEASE_KEY_PASSWORD RELEASE_STORE_PASSWORD; do
+            if [ -z "${{ secrets[name] }}" ]; then
+              echo "::error::缺少仓库 secret: $name（Settings → Secrets and variables → Actions 配置）"
+              missing=1
+            fi
+          done
+          [ "$missing" = "0" ] || exit 1
+
+      - name: Compute Version
+        run: |
+          version="3.$(TZ=Asia/Shanghai date +%y%m%d%H)"
+          echo "版本号: $version"
+          echo "VERSION=$version" >> $GITHUB_ENV
+
+      - name: Prepare Assets
+        run: |
+          echo "清空 18PlusList.txt"
+          echo "" > $GITHUB_WORKSPACE/app/src/main/assets/18PlusList.txt
+
+      - name: Release APK Sign
+        run: |
+          {
+            echo ""
+            echo "RELEASE_KEY_ALIAS=${{ secrets.RELEASE_KEY_ALIAS }}"
+            echo "RELEASE_KEY_PASSWORD=${{ secrets.RELEASE_KEY_PASSWORD }}"
+            echo "RELEASE_STORE_PASSWORD=${{ secrets.RELEASE_STORE_PASSWORD }}"
+            echo "RELEASE_STORE_FILE=./release-key.jks"
+          } >> $GITHUB_WORKSPACE/gradle.properties
+          echo "${{ secrets.RELEASE_KEY_STORE }}" | base64 --decode > $GITHUB_WORKSPACE/release-key.jks
+
+      - name: Build ARM APK
+        run: |
+          sed -i "s/^def version = .*/def version = \"$VERSION\"/" "$GITHUB_WORKSPACE/app/build.gradle"
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease -ParmOnly=true --build-cache --parallel --daemon
+          mkdir -p apk mapping
+          aapt2=$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" -name aapt2 | head -1)
+          src_apk=$(find app/build/outputs/apk -name '*.apk' | head -1)
+          vc=$("$aapt2" dump badging "$src_apk" | sed -n "s/package:.*versionCode='\([0-9]*\)'.*/\1/p" | head -1)
+          mv "$src_apk" "apk/EssentialReader-legadoTeam_${VERSION}_vc${vc}.apk"
+
+      - name: Build Universal APK
+        run: |
+          ./gradlew :app:assembleRelease --build-cache --parallel --daemon
+          aapt2=$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" -name aapt2 | head -1)
+          src_apk=$(find app/build/outputs/apk -name '*.apk' | head -1)
+          vc=$("$aapt2" dump badging "$src_apk" | sed -n "s/package:.*versionCode='\([0-9]*\)'.*/\1/p" | head -1)
+          mv "$src_apk" "apk/EssentialReader-legadoTeam_${VERSION}_universal_vc${vc}.apk"
+
+      - name: Collect Mapping
+        run: |
+          find app/build/outputs/mapping -name "mapping.txt" -exec mv {} mapping/mapping.txt \; || true
+          find app/build/outputs/mapping -name "missing_rules.txt" -exec mv {} mapping/missing_rules.txt \; || true
+
+      - name: Verify Artifacts
+        run: |
+          mapfile -d '' apks < <(find apk -maxdepth 1 -type f -name '*.apk' -print0)
+          if [ ${#apks[@]} -ne 2 ]; then
+            echo "::error::期望 2 个 APK（arm/universal），实际 ${#apks[@]}"
+            exit 1
+          fi
+          for apk in "${apks[@]}"; do
+            name=$(basename "$apk")
+            case "$name" in
+              *_universal_vc*) kind=universal ;;
+              *) kind=arm ;;
+            esac
+            packaged_abis=$(unzip -Z1 "$apk" | sed -n 's#^lib/\([^/]*\)/.*#\1#p' | sort -u | paste -sd ' ' -)
+            if [ "$kind" = universal ]; then
+              expected="arm64-v8a armeabi-v7a x86 x86_64"
+            else
+              expected="arm64-v8a armeabi-v7a"
+            fi
+            if [ "$packaged_abis" != "$expected" ]; then
+              echo "::error::$kind APK 的 ABI 异常: $packaged_abis"
+              exit 1
+            fi
+          done
+          echo "产物就绪："
+          ls -la apk/
+
+      - name: Archive Mapping
+        uses: actions/upload-artifact@v7
+        with:
+          name: mapping-${{ env.VERSION }}
+          path: mapping/
+          if-no-files-found: ignore
+
+      - name: Create Tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag --force "$VERSION" "$(git rev-parse HEAD)"
+          git push origin "refs/tags/$VERSION" --force
+
+      - name: Publish Release
+        uses: ncipollo/release-action@v1
+        with:
+          name: EssentialReader-legadoTeam_${{ env.VERSION }}
+          tag: ${{ env.VERSION }}
+          body: ${{ github.event.inputs.changelog }}
+          prerelease: false
+          makeLatest: true
+          allowUpdates: true
+          replacesArtifacts: true
+          artifactErrorsFailBuild: true
+          artifacts: apk/*.apk
