@@ -47,7 +47,8 @@ jq -e --arg version "$version" '
             id,
             name,
             size,
-            state
+            state,
+            url
           }]
     }
   else

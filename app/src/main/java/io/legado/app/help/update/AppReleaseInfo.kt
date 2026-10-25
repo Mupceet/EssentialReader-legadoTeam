@@ -58,7 +58,9 @@ data class Asset(
     val id: Int,
     val name: String,
     val state: String,
-    val url: String,
+    // GitHub API 恒携带，但 update-manifests 投影早期版本未输出该字段；
+    // Gson 反射注入 null 不走构造检查，非空类型会推迟到使用点才炸
+    val url: String?,
     val size: Long = 0L
 ) {
     val isValid: Boolean
@@ -78,7 +80,7 @@ data class Asset(
             note = note,
             name = name,
             downloadUrl = apkUrl,
-            assetUrl = url,
+            assetUrl = url.orEmpty(),
             versionName = parseReleaseVersionName(releaseTag, name),
             size = size,
             versionCode = parseAssetVersionCode(name)
