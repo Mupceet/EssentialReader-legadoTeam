@@ -1,6 +1,8 @@
 package io.legado.app.eink.bridge
 
 import android.graphics.Typeface
+import android.os.Build
+import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
 import com.script.rhino.runScriptWithContext
 import io.legado.app.constant.AppConst
@@ -41,12 +43,16 @@ import io.legado.app.model.localBook.LocalBook
 import io.legado.app.model.webBook.WebBook
 import io.legado.app.ui.book.read.page.provider.ChapterProvider
 import io.legado.app.ui.login.SourceLoginJsExtensions
+import io.legado.app.utils.RealPathUtil
 import io.legado.app.utils.dpToPx
+import io.legado.app.utils.isContentScheme
 import io.legado.app.utils.putPrefInt
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import splitties.init.appCtx
 import java.util.Date
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.min
 
@@ -585,6 +591,32 @@ internal object ReaderEngineImpl : ReaderEngine {
         val typeface: Typeface? = ChapterProvider.contentPaint.typeface
         return ReaderTipTypefaces(header = typeface, footer = typeface)
     }
+
+    /** 字体 path → Typeface 进程级缓存（预览列表逐项加载，同路径不重复解码）。 */
+    private val fontTypefaceCache = ConcurrentHashMap<String, Typeface>()
+
+    /**
+     * 字体文件 path → Typeface（字体选择列表逐项名称/示例预览用，阅读
+     * 字体与应用字体两列表共用）：加载口径与宿主引擎 ChapterProvider.
+     * loadTypeface 同构（content:// 经 FileDescriptor Builder，API < 26
+     * 经 RealPathUtil 实路径，其余按文件路径），外裹进程级缓存。
+     */
+    override suspend fun loadFontTypeface(path: String): Typeface? =
+        withContext(Dispatchers.IO) {
+            fontTypefaceCache[path] ?: runCatching {
+                when {
+                    path.isContentScheme() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ->
+                        appCtx.contentResolver.openFileDescriptor(path.toUri(), "r")!!.use {
+                            Typeface.Builder(it.fileDescriptor).build()
+                        }
+
+                    path.isContentScheme() ->
+                        Typeface.createFromFile(RealPathUtil.getPath(appCtx, path.toUri()))
+
+                    else -> Typeface.createFromFile(path)
+                }
+            }.getOrNull()?.also { fontTypefaceCache[path] = it }
+        }
 
     override fun formatTimeNow(): String =
         AppConst.timeFormat.format(Date()).toString()
