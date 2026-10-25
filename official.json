@@ -1,19 +1,19 @@
 {
-  "tag_name": "3.26102513",
-  "name": "moben-legado_3.26102513",
-  "body": "首个正式版 · EssentialReader-legadoTeam（墨本 legado）\n\n基于 LegadoTeam/legado 上游主线，集成 EssentialReader 家族 E-Ink Compose 纯净阅读模式（eink-lib 0.7.x 契约 v2）：\n\n- 完整模式主题设置新增「纯净模式(墨水屏)」——一键切换 Compose 墨水屏界面，书架/搜索/详情/目录/换源/阅读全链路\n- 阅读：排版调参即时重排（字号/边距/行距/标题字重等）、划线与想法（笔记 Tab 统一承载）、段评气泡、点击区域九宫格\n- 书架：分组文件夹/筛选器双视图、封面与完整模式共享磁盘缓存、换源历史缓存免重搜\n- 备份与恢复（WebDAV 配置/测试/恢复）、应用字体与标题字重设置、全局界面字体\n- 更新检查与下载经镜像加速，国内网络可用性友好",
+  "tag_name": "3.26102514",
+  "name": "moben-legado_3.26102514",
+  "body": "## 新增\n- 阅读页「信息配置」新增「页眉页脚字号」调整（5–50sp，默认 12，与完整模式同设置互通，预留带高随字号自动伸缩）\n\n## 修复\n- 阅读页字体弹窗首次「选择字体文件夹」直开系统选择器，在无系统 DocumentsUI 的固件（Android 7 墨水屏常见）无法弹出——改为应用内文件浏览器优先、系统选择器兜底，与字体设置页同链\n- 使用自带文件夹选择器或手动输入路径选定目录后字体清单为空——file:// 地址未归一化为文件路径导致枚举失效；已保存的异常配置升级后自动恢复，无需重新选择",
   "prerelease": false,
   "assets": [
     {
-      "browser_download_url": "https://github.com/Mupceet/EssentialReader-legadoTeam/releases/download/3.26102513/moben-legado_3.26102513_universal_vc38541.apk",
+      "browser_download_url": "https://github.com/Mupceet/EssentialReader-legadoTeam/releases/download/3.26102514/moben-legado_3.26102514_universal_vc38543.apk",
       "content_type": "application/vnd.android.package-archive",
-      "created_at": "2026-10-25T05:17:04Z",
+      "created_at": "2026-10-25T06:17:09Z",
       "download_count": 0,
-      "id": 674170415,
-      "name": "moben-legado_3.26102513_universal_vc38541.apk",
-      "size": 29125404,
+      "id": 674268610,
+      "name": "moben-legado_3.26102514_universal_vc38543.apk",
+      "size": 29125414,
       "state": "uploaded",
-      "url": "https://api.github.com/repos/Mupceet/EssentialReader-legadoTeam/releases/assets/674170415"
+      "url": "https://api.github.com/repos/Mupceet/EssentialReader-legadoTeam/releases/assets/674268610"
     }
   ]
 }
