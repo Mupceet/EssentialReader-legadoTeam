@@ -51,8 +51,7 @@ object AppUpdateGitHub : AppUpdate.AppUpdateInterface {
     private const val manifestTimeoutMillis = 2500L
 
     private val checkVariant: AppVariant
-        get() = AppConst.appInfo.appVariant.takeUnless { it == AppVariant.UNKNOWN }
-            ?: AppVariant.OFFICIAL
+        get() = resolveCheckVariant(AppConst.appInfo.appVariant)
 
     private suspend fun getLatestRelease(): List<AppReleaseInfo> {
         // manifest 命中时 API 兜底失败不拖垮检查（国内 API 直连不可达是

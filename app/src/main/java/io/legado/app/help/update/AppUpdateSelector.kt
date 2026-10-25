@@ -94,6 +94,18 @@ internal fun isUniversalPackageName(fileName: String): Boolean {
         fileName.contains("_._")
 }
 
+/**
+ * 正式检查通道（AppUpdateGitHub.check）的本机变体归一化：本发行版仅
+ * 发布正式版，本机变体里的 UNKNOWN（自有签名 release 包，非上游官方/
+ * beta 签名）与 beta 变体（debug 构建 BuildConfig.DEBUG 恒 beta，上游
+ * 语义残留）统一回退 OFFICIAL——release 侧变体过滤防的是 beta 资产
+ * 误配（inferAppVariant 的 pre-release/命名推断），对本机变体无需区分。
+ */
+internal fun resolveCheckVariant(appVariant: AppVariant): AppVariant {
+    return appVariant.takeUnless { it == AppVariant.UNKNOWN || it.isBeta() }
+        ?: AppVariant.OFFICIAL
+}
+
 // 本发行版（EssentialReader-legadoTeam）无上游的 CDN 分发网（cdn.mgz.la
 // 等仅镜像上游官方资产）：更新下载经 UpdateAccelerator 探测改写
 // （gh-proxy.com 前缀，可达才用、失败回退 GitHub 直连，墨本 md3 同构），

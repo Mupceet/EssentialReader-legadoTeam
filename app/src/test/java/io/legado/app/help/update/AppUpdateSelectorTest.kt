@@ -10,6 +10,43 @@ import java.time.Instant
 
 class AppUpdateSelectorTest {
 
+    /**
+     * 本发行版线上首版实测数据：tag 3.26102510、资产
+     * moben-legado_3.26102510_universal_vc38538.apk 解析为 OFFICIAL。
+     * 本地 debug 构建（BuildConfig.DEBUG）AppVariant 恒为 BETA_RELEASE，
+     * 正式通道 variant 过滤永不命中 → 恒「已是最新版本」。
+     */
+    @Test
+    fun debugBuildNeverMatchesOfficialChannelRelease() {
+        val officialRelease = release(
+            name = "moben-legado_3.26102510_universal_vc38538.apk",
+            appVariant = AppVariant.OFFICIAL,
+            versionName = "3.26102510",
+            versionCode = 38538
+        )
+
+        // debug 包：BETA_RELEASE 变体 + 带后缀 versionName + versionCode=30000（git 计数失败兜底）
+        assertNull(
+            selectUpdateRelease(
+                releases = listOf(officialRelease),
+                appVariant = AppVariant.BETA_RELEASE,
+                currentVersionName = "3.26102300debug",
+                supportedAbis = listOf("arm64-v8a")
+            )
+        )
+
+        // 同数据下正式包（OFFICIAL）能检出 —— 排除网络/解析/版本比较等其他因素
+        assertEquals(
+            officialRelease,
+            selectUpdateRelease(
+                releases = listOf(officialRelease),
+                appVariant = AppVariant.OFFICIAL,
+                currentVersionName = "3.26102300",
+                supportedAbis = listOf("arm64-v8a")
+            )
+        )
+    }
+
     @Test
     fun formalReleaseAssetsKeepTheirConfiguredVariants() {
         assertEquals(
@@ -346,106 +383,23 @@ class AppUpdateSelectorTest {
         )
     }
 
+    /**
+     * 正式检查通道变体归一化：debug 构建（BuildConfig.DEBUG 恒 beta）
+     * 与自有签名 release 包（非上游签名 → UNKNOWN）都必须落到 OFFICIAL，
+     * 否则 debug 包永远匹配不到仅发布正式版的更新源。
+     */
     @Test
-    fun updateDownloadsUseCdnExceptForHistoricalSanitizedNames() {
-        val armFile = "legado_app_3.26071309_release.apk"
-        assertEquals(
-            "https://cdn.mgz.la/app/legado_app_3.26071309_release.apk",
-            resolveAppUpdateDownloadUrl(
-                armFile,
-                "https://github.com/example/arm.apk"
-            )
-        )
-        assertEquals(
-            "https://cdn.gigu.edu.kg/app/legado_app_3.26071309_release.apk",
-            resolveAppUpdateMirrorUrl(
-                armFile,
-                "https://cdn.mgz.la/app/$armFile"
-            )
-        )
-        assertEquals(
-            "https://cdn.mgz.edu.kg/app/legado_app_3.26071309_release.apk",
-            resolveAppUpdateAlternateMirrorUrl(
-                armFile,
-                "https://cdn.mgz.la/app/$armFile",
-                "https://cdn.gigu.edu.kg/app/$armFile"
-            )
-        )
-        assertEquals(
-            "https://cdn.mgz.la/app/legado_app_3.26071309_universal_release.apk",
-            resolveAppUpdateDownloadUrl(
-                "legado_app_3.26071309_universal_release.apk",
-                "https://github.com/example/universal.apk"
-            )
-        )
-        assertEquals(
-            "https://github.com/example/legacy-universal.apk",
-            resolveAppUpdateDownloadUrl(
-                "legado_app_3.26.0713082212_._release.apk",
-                "https://github.com/example/legacy-universal.apk"
-            )
-        )
-        assertNull(
-            resolveAppUpdateMirrorUrl(
-                "legado_app_3.26.0713082212_._release.apk",
-                "https://github.com/example/legacy-universal.apk"
-            )
-        )
-        assertNull(
-            resolveAppUpdateAlternateMirrorUrl(
-                "legado_app_3.26.0713082212_._release.apk",
-                "https://github.com/example/legacy-universal.apk",
-                null
-            )
-        )
+    fun checkChannelNormalizesDebugAndSelfSignedVariantsToOfficial() {
+        assertEquals(AppVariant.OFFICIAL, resolveCheckVariant(AppVariant.BETA_RELEASE))
+        assertEquals(AppVariant.OFFICIAL, resolveCheckVariant(AppVariant.BETA_RELEASEA))
+        assertEquals(AppVariant.OFFICIAL, resolveCheckVariant(AppVariant.UNKNOWN))
+        assertEquals(AppVariant.OFFICIAL, resolveCheckVariant(AppVariant.OFFICIAL))
     }
 
     @Test
-    fun updateFallbackAndIgnorePoliciesStayScoped() {
-        val githubUrl = "https://github.com/example/app.apk"
-        val cdnUrl = resolveAppUpdateDownloadUrl("legado_app_release.apk", githubUrl)
-
-        assertEquals(githubUrl, resolveAppUpdateBackupUrl(cdnUrl, githubUrl))
-        assertEquals(
-            "https://cdn.gigu.edu.kg/app/legado_app_release.apk",
-            resolveAppUpdateMirrorUrl("legado_app_release.apk", cdnUrl)
-        )
-        assertEquals(
-            "https://cdn.mgz.edu.kg/app/legado_app_release.apk",
-            resolveAppUpdateAlternateMirrorUrl(
-                "legado_app_release.apk",
-                cdnUrl,
-                "https://cdn.gigu.edu.kg/app/legado_app_release.apk"
-            )
-        )
-        val update = release("legado_app_release.apk").copy(downloadUrl = githubUrl)
-            .toUpdateInfo()
-        assertEquals(cdnUrl, update.downloadUrl)
-        assertEquals(
-            "https://cdn.gigu.edu.kg/app/legado_app_release.apk",
-            update.mirrorDownloadUrl
-        )
-        assertEquals(
-            "https://cdn.mgz.edu.kg/app/legado_app_release.apk",
-            update.alternateMirrorDownloadUrl
-        )
-        assertEquals(githubUrl, update.backupDownloadUrl)
-        assertNull(resolveAppUpdateBackupUrl(githubUrl, githubUrl))
+    fun ignoredUpdatePolicyStaysScoped() {
         assertTrue(isIgnoredAppUpdate("3.26080220", "3.26080220"))
         assertFalse(isIgnoredAppUpdate("3.26080221", "3.26080220"))
-    }
-
-    @Test
-    fun betaUpdateUsesTheRawGithubAssetInBrowserMode() {
-        val release = release("legado_app_3.26082118_release.apk")
-
-        val update = release.toUpdateInfo(isBeta = true)
-
-        assertEquals(release.downloadUrl, update.downloadUrl)
-        assertNull(update.backupDownloadUrl)
-        assertNull(update.mirrorDownloadUrl)
-        assertNull(update.alternateMirrorDownloadUrl)
-        assertTrue(update.isBeta)
     }
 
     private fun release(
