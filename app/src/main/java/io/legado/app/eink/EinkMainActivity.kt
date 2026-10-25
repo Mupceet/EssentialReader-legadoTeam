@@ -16,6 +16,7 @@ import io.legado.app.eink.bridge.PageTurnEffectEngineImpl
 import io.legado.app.eink.contract.EInkHostActivity
 import io.legado.app.help.config.AppConfig
 import io.legado.app.ui.main.MainActivity
+import io.legado.app.utils.isContentScheme
 import io.legado.app.utils.putPrefString
 import io.legado.app.utils.startActivity
 
@@ -39,15 +40,23 @@ class EInkMainActivity : EInkHostActivity() {
      * 字体文件夹选择接管（无系统 DocumentsUI 的低版本/定制固件）：
      * 宿主完整模式同款 HandleFileContract（应用内文件浏览器，DIR 模式，
      * 带 SD/Fonts 快捷项）——与 FontSelectDialog.selectFontDir 同链。
-     * 结果双形态（content uri / 文件路径）均被 ReaderFontFolder 枚举
-     * 与 loadFontTypeface 加载支持，模块原样落库即可。
+     * 结果归一化为 content uri 字符串或文件路径（selectFontDir 同口径），
+     * ReaderFontFolder 枚举与 loadFontTypeface 加载均支持，模块原样落库
+     * 即可。
      */
     private var pickFontFolderCallback: ((String?) -> Unit)? = null
 
     private val pickFontFolder = registerForActivityResult(
         io.legado.app.ui.file.HandleFileContract()
     ) { result ->
-        pickFontFolderCallback?.invoke(result.uri?.toString())
+        // 双形态归一化（对齐 FontSelectDialog.selectFontDir）：content uri
+        // 原样字符串；file://（FilePickerDialog 应用内选择器与手动输入的
+        // 返回形态）取解码路径——契约约定回传「content uri 或文件路径」，
+        // file:// 字符串直落库会使 File(folder) 路径解析失效（枚举恒空）
+        val folder = result.uri?.let { uri ->
+            if (uri.isContentScheme()) uri.toString() else uri.path
+        }
+        pickFontFolderCallback?.invoke(folder)
         pickFontFolderCallback = null
     }
 

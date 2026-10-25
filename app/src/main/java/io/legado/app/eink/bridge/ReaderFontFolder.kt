@@ -52,10 +52,16 @@ internal object ReaderFontFolder {
         appCtx.putPrefString(PreferKey.fontFolder, uri)
     }
 
+    /**
+     * 文件夹字符串 → FileDoc：content uri 走 DocumentsUI 树；其余按文件
+     * 路径——先经 Uri 解码归一化（file:// 形态的历史落库值自愈；plain
+     * 路径 Uri.path 原样返回），File("file://...") 不是合法路径、枚举
+     * 恒空。
+     */
     private fun folderDoc(folder: String): FileDoc? =
         if (folder.isContentScheme()) {
             DocumentFile.fromTreeUri(appCtx, Uri.parse(folder))?.let(FileDoc::fromDocumentFile)
         } else {
-            FileDoc.fromFile(File(folder))
+            FileDoc.fromFile(File(Uri.parse(folder).path ?: folder))
         }
 }
