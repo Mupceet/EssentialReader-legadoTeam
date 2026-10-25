@@ -18,15 +18,29 @@ import splitties.init.appCtx
 @Suppress("unused")
 object AppUpdateGitHub : AppUpdate.AppUpdateInterface {
 
+    /**
+     * 更新源：本发行版自有仓库（EssentialReader 家族 · LegadoTeam 上游）。
+     * 仅发布正式版（releases 列表过滤 pre-release）；beta 通道不发布
+     * （tags/beta 恒 404，checkBeta 走「获取失败」语义）。发版资产命名
+     * 约定见 AppReleaseInfo 解析：文件名不得含 "release" 字样（否则被
+     * 推断为 beta 变体）、tag 取 3.yyMMddHH 版本、文件名带 vc<versionCode>
+     * 段保证版本比较稳定。
+     */
+    private const val repoPath = "Mupceet/EssentialReader-legadoTeam"
+
+    private val releasesUrl =
+        "https://api.github.com/repos/$repoPath/releases?per_page=30"
+
+    private val betaTagUrl =
+        "https://api.github.com/repos/$repoPath/releases/tags/beta"
+
     private val checkVariant: AppVariant
         get() = AppConst.appInfo.appVariant.takeUnless { it == AppVariant.UNKNOWN }
             ?: AppVariant.OFFICIAL
 
     private suspend fun getLatestRelease(): List<AppReleaseInfo> {
-        val lastReleaseUrl =
-            "https://api.github.com/repos/LegadoTeam/legado/releases?per_page=30"
         val res = okHttpClient.newCallResponse {
-            url(lastReleaseUrl)
+            url(releasesUrl)
         }
         if (!res.isSuccessful) {
             throw NoStackTraceException("获取新版本出错(${res.code})")
@@ -46,7 +60,7 @@ object AppUpdateGitHub : AppUpdate.AppUpdateInterface {
 
     private suspend fun getBetaRelease(): List<AppReleaseInfo> {
         val res = okHttpClient.newCallResponse {
-            url("https://api.github.com/repos/LegadoTeam/legado/releases/tags/beta")
+            url(betaTagUrl)
         }
         if (!res.isSuccessful) {
             throw NoStackTraceException(

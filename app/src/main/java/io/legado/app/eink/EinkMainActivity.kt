@@ -36,6 +36,28 @@ class EInkMainActivity : EInkHostActivity() {
     override fun onInstallEngines() = EInkBridge.install()
 
     /**
+     * 字体文件夹选择接管（无系统 DocumentsUI 的低版本/定制固件）：
+     * 宿主完整模式同款 HandleFileContract（应用内文件浏览器，DIR 模式，
+     * 带 SD/Fonts 快捷项）——与 FontSelectDialog.selectFontDir 同链。
+     * 结果双形态（content uri / 文件路径）均被 ReaderFontFolder 枚举
+     * 与 loadFontTypeface 加载支持，模块原样落库即可。
+     */
+    private var pickFontFolderCallback: ((String?) -> Unit)? = null
+
+    private val pickFontFolder = registerForActivityResult(
+        io.legado.app.ui.file.HandleFileContract()
+    ) { result ->
+        pickFontFolderCallback?.invoke(result.uri?.toString())
+        pickFontFolderCallback = null
+    }
+
+    override fun onPickFontFolder(onResult: (String?) -> Unit): Boolean {
+        pickFontFolderCallback = onResult
+        pickFontFolder.launch { }
+        return true
+    }
+
+    /**
      * 挂载为端口弹层的宿主 Activity（段评半屏 WebView 等宿主 DialogFragment
      * 的事务宿主与生命周期作用域；见 EInkBridge.attachHostActivity）。
      * 基类 onCreate 为 final 编排，onStart/onStop 是可用的生命周期挂点。
