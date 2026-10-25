@@ -52,14 +52,23 @@ jobs:
         uses: gradle/actions/setup-gradle@v6.4.0
 
       - name: Check Signing Secrets
+        env:
+          KS: ${{ secrets.RELEASE_KEY_STORE }}
+          KA: ${{ secrets.RELEASE_KEY_ALIAS }}
+          KP: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          SP: ${{ secrets.RELEASE_STORE_PASSWORD }}
         run: |
           missing=0
-          for name in RELEASE_KEY_STORE RELEASE_KEY_ALIAS RELEASE_KEY_PASSWORD RELEASE_STORE_PASSWORD; do
-            if [ -z "${{ secrets[name] }}" ]; then
-              echo "::error::缺少仓库 secret: $name（Settings → Secrets and variables → Actions 配置）"
+          check() {
+            if [ -z "$2" ]; then
+              echo "::error::缺少仓库 secret: $1（Settings → Secrets and variables → Actions 配置）"
               missing=1
             fi
-          done
+          }
+          check RELEASE_KEY_STORE "$KS"
+          check RELEASE_KEY_ALIAS "$KA"
+          check RELEASE_KEY_PASSWORD "$KP"
+          check RELEASE_STORE_PASSWORD "$SP"
           [ "$missing" = "0" ] || exit 1
 
       - name: Compute Version
