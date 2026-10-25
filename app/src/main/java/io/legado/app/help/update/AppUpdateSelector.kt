@@ -94,17 +94,15 @@ internal fun isUniversalPackageName(fileName: String): Boolean {
         fileName.contains("_._")
 }
 
+// 本发行版（EssentialReader-legadoTeam）无上游的 CDN 分发网（cdn.mgz.la
+// 等仅镜像上游官方资产），更新下载一律 GitHub Release 资产直链，不留
+// 指向不存在资产的镜像 URL。
 internal fun resolveAppUpdateDownloadUrl(fileName: String, githubUrl: String): String {
-    return if (fileName.contains("_._")) {
-        githubUrl
-    } else {
-        "https://cdn.mgz.la/app/$fileName"
-    }
+    return githubUrl
 }
 
 internal fun resolveAppUpdateMirrorUrl(fileName: String, primaryUrl: String): String? {
-    if (fileName.contains("_._")) return null
-    return "https://cdn.gigu.edu.kg/app/$fileName".takeUnless { it == primaryUrl }
+    return null
 }
 
 internal fun resolveAppUpdateAlternateMirrorUrl(
@@ -112,10 +110,7 @@ internal fun resolveAppUpdateAlternateMirrorUrl(
     primaryUrl: String,
     mirrorUrl: String?
 ): String? {
-    if (fileName.contains("_._")) return null
-    return "https://cdn.mgz.edu.kg/app/$fileName".takeUnless {
-        it == primaryUrl || it == mirrorUrl
-    }
+    return null
 }
 
 internal fun resolveAppUpdateBackupUrl(primaryUrl: String, githubUrl: String): String? =

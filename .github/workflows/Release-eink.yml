@@ -8,12 +8,16 @@ name: Release E-Ink
 #  2. 无分支门控：纯手动 dispatch（默认分支 eink/port 即可选）；
 #  3. 签名 secrets 全参数化（RELEASE_KEY_STORE 为 keystore 的 base64，
 #     RELEASE_KEY_ALIAS/PASSWORD/STORE_PASSWORD）；
-#  4. 单变体：仅 app/release（不做 releaseA 共存、不做 CDN/网盘分发）；
+#  4. 单变体单包：仅 app/release 的 **universal 包**（arm-only 不出——
+#     更新选择器 isUniversalPackage 语义下 universal 对全设备合法，
+#     x86 设备也只认 universal，单包即全覆盖）；
 #  5. 产物命名对齐应用内更新检查的解析规则
-#     （AppReleaseInfo.inferAppVariant / parseAssetVersionCode）：
-#     EssentialReader-legadoTeam_<3.yyMMddHH>[_universal]_vc<versionCode>.apk
-#     —— 文件名不得含 release/releasea 字样（会被推断为 beta 变体，
-#     正式包签名 UNKNOWN→OFFICIAL 回落将永远选不中）；
+#     （AppUpdateInfo.inferAppVariant / parseAssetVersionCode /
+#     isUniversalPackageName）：
+#     moben-legado_<3.yyMMddHH>_universal_vc<versionCode>.apk
+#     —— 文件名不得含 release/releasea 字样（会被推断为 beta 变体）；
+#     含 universal 段（isUniversalPackage 判定 + 万一恢复双包时的兜底）；
+#     vc 段走 versionCode 稳定比较；
 #  6. 发布 prerelease: false + makeLatest: true（正式版语义）；
 #  7. versionCode 由 app/build.gradle 的 git rev-list 公式自算
 #     （fetch-depth: 0 必需），APK 命名的 vc 段经 aapt2 从产物提取。
@@ -93,24 +97,16 @@ jobs:
           } >> $GITHUB_WORKSPACE/gradle.properties
           echo "${{ secrets.RELEASE_KEY_STORE }}" | base64 --decode > $GITHUB_WORKSPACE/release-key.jks
 
-      - name: Build ARM APK
+      - name: Build Universal APK
         run: |
           sed -i "s/^def version = .*/def version = \"$VERSION\"/" "$GITHUB_WORKSPACE/app/build.gradle"
           chmod +x gradlew
-          ./gradlew :app:assembleRelease -ParmOnly=true --build-cache --parallel --daemon
+          ./gradlew :app:assembleRelease --build-cache --parallel --daemon
           mkdir -p apk mapping
           aapt2=$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" -name aapt2 | head -1)
           src_apk=$(find app/build/outputs/apk -name '*.apk' | head -1)
           vc=$("$aapt2" dump badging "$src_apk" | sed -n "s/package:.*versionCode='\([0-9]*\)'.*/\1/p" | head -1)
-          mv "$src_apk" "apk/EssentialReader-legadoTeam_${VERSION}_vc${vc}.apk"
-
-      - name: Build Universal APK
-        run: |
-          ./gradlew :app:assembleRelease --build-cache --parallel --daemon
-          aapt2=$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" -name aapt2 | head -1)
-          src_apk=$(find app/build/outputs/apk -name '*.apk' | head -1)
-          vc=$("$aapt2" dump badging "$src_apk" | sed -n "s/package:.*versionCode='\([0-9]*\)'.*/\1/p" | head -1)
-          mv "$src_apk" "apk/EssentialReader-legadoTeam_${VERSION}_universal_vc${vc}.apk"
+          mv "$src_apk" "apk/moben-legado_${VERSION}_universal_vc${vc}.apk"
 
       - name: Collect Mapping
         run: |
@@ -120,27 +116,20 @@ jobs:
       - name: Verify Artifacts
         run: |
           mapfile -d '' apks < <(find apk -maxdepth 1 -type f -name '*.apk' -print0)
-          if [ ${#apks[@]} -ne 2 ]; then
-            echo "::error::期望 2 个 APK（arm/universal），实际 ${#apks[@]}"
+          if [ ${#apks[@]} -ne 1 ]; then
+            echo "::error::期望 1 个 universal APK，实际 ${#apks[@]}"
             exit 1
           fi
-          for apk in "${apks[@]}"; do
-            name=$(basename "$apk")
-            case "$name" in
-              *_universal_vc*) kind=universal ;;
-              *) kind=arm ;;
-            esac
-            packaged_abis=$(unzip -Z1 "$apk" | sed -n 's#^lib/\([^/]*\)/.*#\1#p' | sort -u | paste -sd ' ' -)
-            if [ "$kind" = universal ]; then
-              expected="arm64-v8a armeabi-v7a x86 x86_64"
-            else
-              expected="arm64-v8a armeabi-v7a"
-            fi
-            if [ "$packaged_abis" != "$expected" ]; then
-              echo "::error::$kind APK 的 ABI 异常: $packaged_abis"
-              exit 1
-            fi
-          done
+          apk="${apks[0]}"
+          case "$(basename "$apk")" in
+            moben-legado_*_universal_vc*.apk) ;;
+            *) echo "::error::产物命名不符：$(basename "$apk")"; exit 1 ;;
+          esac
+          packaged_abis=$(unzip -Z1 "$apk" | sed -n 's#^lib/\([^/]*\)/.*#\1#p' | sort -u | paste -sd ' ' -)
+          if [ "$packaged_abis" != "arm64-v8a armeabi-v7a x86 x86_64" ]; then
+            echo "::error::universal APK 的 ABI 异常: $packaged_abis"
+            exit 1
+          fi
           echo "产物就绪："
           ls -la apk/
 
@@ -161,7 +150,7 @@ jobs:
       - name: Publish Release
         uses: ncipollo/release-action@v1
         with:
-          name: EssentialReader-legadoTeam_${{ env.VERSION }}
+          name: moben-legado_${{ env.VERSION }}
           tag: ${{ env.VERSION }}
           body: ${{ github.event.inputs.changelog }}
           prerelease: false
