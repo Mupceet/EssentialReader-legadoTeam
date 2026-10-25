@@ -10,7 +10,9 @@ import io.legado.app.eink.contract.ReaderStyleParamIds as Ids
  *
  * 本宿主能力边界（不可用参数直接不进目录，模块隐藏对应设置项）：
  *  - 标题/页眉无独立字体（引擎单字体 + titleBold/textBold 独立字重键）；
- *  - 标题行距、页眉/页脚字号无配置键；
+ *  - 标题行距无配置键；
+ *  - 页眉/页脚字号共用宿主单键 ReadTipConfig.tipTextSize（页眉页脚同
+ *    字号，完整模式同键同值域；模块统一拖动条写两侧）；
  *  - 标题字号为「正文 + 增量」模型（引擎 titlePaint = textSize+titleSize），
  *    契约 TITLE_SIZE 的绝对值在 applyStyle/currentStyle 映射期换算；
  *  - 正文/标题字重均仅 0 常规/1 粗/2 细三预设（引擎 getPaints）——
@@ -18,11 +20,10 @@ import io.legado.app.eink.contract.ReaderStyleParamIds as Ids
  *    量化兜底）。标题字重的「跟随正文」态（titleBold=-1）按引擎语义
  *    在快照期折算等效档，编辑写入即独立生效。
  *
- * 页眉/页脚字号渲染为锁死档（预留带推导 ≈ 12sp，对齐完整模式）。
- *
  * affectsLayout 判定：本宿主 visibleHeight = viewHeight - 上下边距（含
  * E-Ink 装饰预留），页眉/页脚显隐与分割线不改变分页几何（绘制于边距
- * 带内），标 affectsLayout = false；字号/字体/字重/标题参数与四边距均
+ * 带内），标 affectsLayout = false；字号（页眉/页脚带高随字号伸缩，
+ * 见 ReaderEngineImpl.syncTipReserves）/字体/字重/标题参数与四边距均
  * 影响排版。
  */
 internal object HostStyleCatalog {
@@ -82,6 +83,11 @@ internal object HostStyleCatalog {
                 affectsLayout = false,
                 default = true,
             ),
+            // 页眉/页脚字号：宿主单键 ReadTipConfig.tipTextSize（值域/默认
+            // 同宿主 minTextSize..maxTextSize，页眉页脚同字号——模块统一
+            // 拖动条写两侧）；带高随字号伸缩（syncTipReserves）影响分页
+            stepped(Ids.HEADER_SIZE, 5f, 50f, 12f),
+            stepped(Ids.FOOTER_SIZE, 5f, 50f, 12f),
             ReaderStyleParam.Toggle(
                 id = Ids.HEADER_DIVIDER,
                 available = true,

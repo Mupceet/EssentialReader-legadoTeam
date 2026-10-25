@@ -432,10 +432,14 @@ internal object ReaderEngineImpl : ReaderEngine {
         style.footerVisible?.let { ReadTipConfig.footerMode = if (it) 0 else 1 }
         style.headerDivider?.let { ReadBookConfig.showHeaderLine = it }
         style.footerDivider?.let { ReadBookConfig.showFooterLine = it }
-        // 页眉/页脚字号不映射：宿主引擎无对应键，渲染为锁死档（引擎预留
-        // 带推导 ≈ 12sp 对齐完整模式；可调档待模块设置行按目录守卫后落地）
+        // 页眉/页脚字号：宿主单键 ReadTipConfig.tipTextSize（页眉页脚同
+        // 字号）；模块统一写两侧同值，header/footer 任一在场即写（防御
+        // 只写单侧的调用方），setter 内按宿主值域钳制
+        style.headerSize?.let { ReadTipConfig.tipTextSize = it }
+            ?: style.footerSize?.let { ReadTipConfig.tipTextSize = it }
         ReadBookConfig.save()
-        // tip 内边距可能刚被写入：带宽随之同步（行高恒定，可用高度不变）
+        // tip 字号/内边距可能刚被写入：带高随之同步（行高随字号伸缩，
+        // upLayout 重算分页几何）
         syncTipReserves()
         ChapterProvider.upStyle()
     }
@@ -546,24 +550,24 @@ internal object ReaderEngineImpl : ReaderEngine {
      * 隐藏即让位正文；E-Ink 并入引擎边距实现同语义——正文起点 = 带底 +
      * 正文配置边距，带底即 extent 端口值，两侧严格一致）。
      *
-     * 带宽 = tip 内边距 + 行高（页脚另加模块 2dp 进度条）——模块在带内
-     * 扣除同样的内边距后可用高度恒为行高值，推导字号恒 ≈12sp（完整模式
-     * tip 文字同源），不受用户 tip 内边距配置影响。
+     * 带宽 = tip 内边距 + 行高（页脚另加模块 2dp 进度条）——行高随页眉/
+     * 页脚字号设置伸缩（[EInkBridge.tipRowDp]，宿主 tipTextSize 同源），
+     * 模块在带内扣除同样的内边距后按配置字号渲染（行需求钳制保字形）。
      *
      * 同步点：headerFooterVisibility（VM init/翻页/开关切换）、applyStyle
-     * （tip 内边距写入后）、EInkBridge.install。upLayout 幂等（视口未
+     * （字号/tip 内边距写入后）、EInkBridge.install。upLayout 幂等（视口未
      * 就绪时安全跳过，后续 updateViewSize 会带上预留重算）。
      */
     internal fun syncTipReserves(visibility: ReaderHeaderFooterVisibility = tipVisibility()) {
         val config = ReadBookConfig.durConfig
         ChapterProvider.einkHeaderReserveDp = if (visibility.headerVisible) {
-            config.headerPaddingTop + EInkBridge.TIP_ROW_DP + config.headerPaddingBottom
+            config.headerPaddingTop + EInkBridge.tipRowDp() + config.headerPaddingBottom
         } else {
             0
         }
         ChapterProvider.einkFooterReserveDp = if (visibility.footerVisible) {
             EInkBridge.TIP_PROGRESS_BAR_DP +
-                config.footerPaddingTop + EInkBridge.TIP_ROW_DP + config.footerPaddingBottom
+                config.footerPaddingTop + EInkBridge.tipRowDp() + config.footerPaddingBottom
         } else {
             0
         }
@@ -703,6 +707,9 @@ private fun ReadBookConfig.snapshotStyle(): ReaderTextStyle = ReaderTextStyle(
     // 宿主 0 档（随状态栏）读回 null：不管理
     headerMode = ReadTipConfig.headerMode.takeIf { it != 0 },
     footerVisible = ReadTipConfig.footerMode != 1,
+    // 页眉/页脚字号：宿主单键两侧同读（getter 已按值域钳制）
+    headerSize = ReadTipConfig.tipTextSize,
+    footerSize = ReadTipConfig.tipTextSize,
     headerDivider = showHeaderLine,
     footerDivider = showFooterLine,
 )

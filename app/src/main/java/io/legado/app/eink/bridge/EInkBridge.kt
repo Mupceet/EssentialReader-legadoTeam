@@ -8,6 +8,7 @@ import io.legado.app.eink.contract.GlobalSettings
 import io.legado.app.eink.contract.PageTurnRippleMode
 import io.legado.app.help.config.AppConfig
 import io.legado.app.help.config.ReadBookConfig
+import io.legado.app.help.config.ReadTipConfig
 import io.legado.app.ui.book.read.page.provider.ChapterProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -62,11 +63,13 @@ private const val KEY_FONT_SCALE = "fontScale"
 object EInkBridge {
 
     /**
-     * E-Ink tip 行高（dp）：模块页眉/页脚按「可用高度 ×0.7」推导字号，
-     * 可用高度恒为行高值（带 = tip 内边距 + 行高，内边距在带内扣减）
-     * → 字号恒 ≈12sp，对齐完整模式 PageView 的 12sp tip 行。
+     * E-Ink tip 行高（dp）：随页眉/页脚字号设置（ReadTipConfig.tipTextSize，
+     * 完整模式同键）同步伸缩——行高 = 字号 × 20/14，是模块推导口径
+     * 「可用高度 × 14/20 = 字号」的反演（默认 12sp → 17dp，与历史常量
+     * 一致，既有配置零漂移）。模块侧配置字号渲染仍经行需求钳制，极端
+     * 字体行高超出时字形完整优先（字号微缩）。
      */
-    internal const val TIP_ROW_DP = 17
+    internal fun tipRowDp(): Int = ReadTipConfig.tipTextSize * 20 / 14
 
     /** 模块页脚顶部的自动翻页进度条高度（dp，带宽预算内扣除）。 */
     internal const val TIP_PROGRESS_BAR_DP = 2
