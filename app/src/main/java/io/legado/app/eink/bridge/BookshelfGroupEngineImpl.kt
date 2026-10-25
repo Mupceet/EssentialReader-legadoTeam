@@ -73,9 +73,15 @@ internal object BookshelfGroupEngineImpl : BookshelfGroupEngine {
     private fun userGroupMask(groups: List<BookGroup>): Long =
         groups.filter { it.groupId > 0 }.sumOf { it.groupId }
 
-    /** 系统筛选器行（按 order）。 */
+    /**
+     * 系统筛选器行（按 order）。**只取本宿主引擎认识的 id**
+     * （[SYSTEM_FILTER_NAMES] 键集）：外来 legado 系备份会带入其它分支的
+     * 系统行（漫画/在读等负 id），本宿主 flowByGroup 对未知负 id 走
+     * 用户组分支语义错乱——这类行不进筛选器面（与完整模式只按固定
+     * 常量集呈现一致），行数据保留不动。
+     */
     private fun systemFilterRows(groups: List<BookGroup>): List<BookGroup> =
-        groups.filter { it.groupId < 0 && it.groupId != BookGroup.IdRoot }.sortedBy { it.order }
+        groups.filter { it.groupId in SYSTEM_FILTER_NAMES }.sortedBy { it.order }
 
     /** 书是否符合系统筛选器（语义对齐 BookDao.flowByGroup 的 SQL 分支）。 */
     private fun Book.matchesFilter(filterId: Long, groupMask: Long): Boolean = when (filterId) {
@@ -244,7 +250,10 @@ internal object BookshelfGroupEngineImpl : BookshelfGroupEngine {
 
     override suspend fun applyFilterAdjustments(orderedFilterIds: List<Long>, shownFilterIds: Set<Long>) {
         val groups = appDb.bookGroupDao.flowAll().first()
-        val isFilter = { g: BookGroup -> g.groupId < 0 && g.groupId != BookGroup.IdRoot }
+        // 与筛选器面同口径：只按本宿主认识的 id 集合校验/落位——外来
+        // 备份的未知系统行不参与提交比对（否则集合永不相等、提交恒失败），
+        // 原位原序保留不动
+        val isFilter = { g: BookGroup -> g.groupId in SYSTEM_FILTER_NAMES }
         require(validateClassSubmission(groups, orderedFilterIds, isFilter)) {
             "筛选器列表已变化，请重试"
         }
@@ -330,8 +339,11 @@ internal object BookshelfGroupEngineImpl : BookshelfGroupEngine {
 }
 
 /**
- * 筛选器菜单装配（「无筛选」恒在首位、计数 = 全书架口径；本宿主无
- * hideEmptyGroups 设置键，空计数系统筛选器恒不展示）。
+ * 筛选器菜单装配（对齐 md3/宿主形态：「无筛选」（文件夹视图）恒在
+ * 首位、计数 = 全书架口径；「全部」与各系统筛选器作为平铺视图项并列
+ * ——「无筛选=文件夹、全部=平铺全书架」是两个不同项，缺一不可。
+ * 本宿主无 hideEmptyGroups 设置键，空计数系统筛选器恒不展示
+ * （书架非空时「全部」计数恒 > 0，必显示）。
  */
 internal fun buildFilterUiModels(
     noneCount: Int,
@@ -347,7 +359,6 @@ internal fun buildFilterUiModels(
         )
     )
     counts.forEach { (filterId, count) ->
-        if (filterId == BookGroup.IdAll) return@forEach
         if (count == 0) return@forEach
         add(
             BookshelfGroupUiModel(
