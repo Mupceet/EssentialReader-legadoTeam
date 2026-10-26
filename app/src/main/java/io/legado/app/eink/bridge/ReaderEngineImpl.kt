@@ -641,19 +641,28 @@ internal object ReaderEngineImpl : ReaderEngine {
 
         // readPositionVersion 为宿主进度恢复竞态的版本守卫：E-Ink 单会话
         // 流程由模块自身状态机驱动，不消费该版本（透传忽略）。
+        // 当前章内容更新先驱动高亮规则管线（改度量规则的二次重排触发，
+        // 完整模式 ContentTextView.upHighlight 的 E-Ink 同位职责）：重排
+        // 完成经本回调再发一轮，映射器届时带规则样式出快照。
         override fun upContent(
             relativePosition: Int,
             resetPageOffset: Boolean,
             readPositionVersion: Long?,
             success: (() -> Unit)?,
-        ) = callback.onContentUpdated(relativePosition, resetPageOffset, success)
+        ) {
+            if (relativePosition == 0) ReaderPageSnapshotMapper.driveHighlightRules()
+            callback.onContentUpdated(relativePosition, resetPageOffset, success)
+        }
 
         override suspend fun upContentAwait(
             relativePosition: Int,
             resetPageOffset: Boolean,
             readPositionVersion: Long?,
             success: (() -> Unit)?,
-        ) = callback.onContentUpdated(relativePosition, resetPageOffset, success)
+        ) {
+            if (relativePosition == 0) ReaderPageSnapshotMapper.driveHighlightRules()
+            callback.onContentUpdated(relativePosition, resetPageOffset, success)
+        }
 
         override fun pageChanged() = callback.onPageChanged()
 
