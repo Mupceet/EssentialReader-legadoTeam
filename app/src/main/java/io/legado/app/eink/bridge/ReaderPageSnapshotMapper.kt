@@ -45,12 +45,11 @@ import kotlin.math.roundToInt
  *    纯区间数学，不写回引擎列状态）；
  *  - 颜色以**灰度**跨桥（BT.709 亮度换算、保留 alpha，见 [toEInkGrayArgb]）
  *    ——墨水屏无彩色，灰度是规则彩色的等价表达，模块按值绘制；
- *  - 规则的字体覆盖（字号差/自定义字体/字色/斜体）折为逐段画笔覆盖
+ *  - 规则的字体覆盖（字号差/自定义字体/字色/斜体/加粗）折为逐段画笔覆盖
  *    [ReaderChunkPaintOverride]——引擎按覆盖参数测宽（改度量规则经
  *    [ReadBook.upHighlightSpacing] 二次重排保证），模块按同值绘制才
  *    不会画不满/溢出测宽槽；
- *  - 暂不支持项（无契约等价物，明示降级）：加粗（契约无 fakeBold，
- *    不发射——比真实 BOLD 字体的宽度偏差更安全）、规则自带字距
+ *  - 暂不支持项（无契约等价物，明示降级）：规则自带字距
  *    （重排已把位置烘进列坐标，段内多字词在 API35+ 有半格漂移）、
  *    着重号/边框/阴影（纯视觉）、完整模式手动高亮 BookHighlight
  *    （E-Ink 划线走 bookmark 表另一链路）。
@@ -587,6 +586,7 @@ private data class ChunkOverrideKey(
     val typeface: Typeface?,
     val colorArgb: Int?,
     val skewX: Float?,
+    val fakeBold: Boolean,
 )
 
 /**
@@ -610,15 +610,19 @@ private fun HighlightStyle?.chunkOverrideOrNull(
         typeface = typeface,
         baseTextSizePx = spec.textSizePx,
     ) ?: return null
-    val key = ChunkOverrideKey(override.textSizePx, override.typeface, override.colorArgb, override.skewX)
+    val key = ChunkOverrideKey(
+        override.textSizePx, override.typeface, override.colorArgb, override.skewX, override.fakeBold
+    )
     return interned.getOrPut(key) { override }
 }
 
 /**
- * 逐段画笔覆盖发射判定（纯函数）：字号差/规则字体/灰度字色/合成斜体，
- * 与行规格无差异返回 null。加粗与字距覆盖不发射（契约无对应字段，
- * KDoc 明示降级——加粗无 fakeBold 跨桥、发射真实 BOLD 字体会偏离
- * 引擎槽宽测量；字距位置已由重排烘进列坐标）。
+ * 逐段画笔覆盖发射判定（纯函数）：字号差/规则字体/灰度字色/合成斜体/
+ * 合成加粗，与行规格无差异返回 null。加粗走 fake bold（完整模式
+ * [io.legado.app.ui.book.read.page.HighlightDraw] 同口径——绘制期描边
+ * 加宽、不改步进宽，跨桥无对齐风险；不发射真实 BOLD 字体，避免字形
+ * 宽度偏离引擎槽宽测量）。字距覆盖不发射（契约无字段，KDoc 明示降级：
+ * 位置已由重排烘进列坐标）。
  */
 internal fun ruleChunkOverride(
     style: HighlightStyle,
@@ -629,7 +633,8 @@ internal fun ruleChunkOverride(
     val textSize = textSizePx?.takeIf { it != baseTextSizePx }
     val color = style.textColor.takeIf { it != 0 }?.toEInkGrayArgb()
     val skewX = SYNTHETIC_ITALIC_SKEW_X.takeIf { style.italic }
-    if (textSize == null && typeface == null && color == null && skewX == null) {
+    val fakeBold = style.bold
+    if (textSize == null && typeface == null && color == null && skewX == null && !fakeBold) {
         return null
     }
     return ReaderChunkPaintOverride(
@@ -638,5 +643,6 @@ internal fun ruleChunkOverride(
         fontVariationSettings = null,
         colorArgb = color,
         skewX = skewX,
+        fakeBold = fakeBold,
     )
 }

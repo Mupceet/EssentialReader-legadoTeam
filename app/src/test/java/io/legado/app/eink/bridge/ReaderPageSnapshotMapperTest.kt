@@ -32,17 +32,27 @@ class ReaderPageSnapshotMapperTest {
     // ---- 逐段画笔覆盖发射 ----
 
     @Test
-    fun `空样式与纯视觉样式不发射覆盖`() {
+    fun `空样式与字距样式不发射覆盖`() {
         assertNull(ruleChunkOverride(HighlightStyle(), null, null, 20f))
-        // 加粗/字距无契约字段（明示降级）：不发射，避免真实 BOLD 字体偏离槽宽测量
-        assertNull(ruleChunkOverride(HighlightStyle(bold = true), null, null, 20f))
+        // 字距无契约字段（明示降级）：不发射，位置已由重排烘进列坐标
         assertNull(ruleChunkOverride(HighlightStyle(letterSpacing = 0.2f), null, null, 20f))
+    }
+
+    @Test
+    fun `加粗走合成 fakeBold 跨桥`() {
+        // 完整模式同口径：fake bold 只描边加宽不改步进宽，无对齐风险
+        val override = ruleChunkOverride(HighlightStyle(bold = true), null, null, 20f)!!
+        assertTrue(override.fakeBold)
+        assertNull(override.textSizePx)
+        assertNull(override.typeface)
+        assertNull(override.colorArgb)
+        assertNull(override.skewX)
     }
 
     @Test
     fun `斜体字色字号差发射覆盖`() {
         val override = ruleChunkOverride(
-            HighlightStyle(textColor = 0xFF0000FF.toInt(), italic = true),
+            HighlightStyle(textColor = 0xFF0000FF.toInt(), italic = true, bold = true),
             textSizePx = 24f,
             typeface = null,
             baseTextSizePx = 20f,
@@ -50,6 +60,7 @@ class ReaderPageSnapshotMapperTest {
         assertEquals(24f, override.textSizePx)
         assertEquals(0xFF121212.toInt(), override.colorArgb)
         assertEquals(SYNTHETIC_ITALIC_SKEW_X, override.skewX)
+        assertTrue(override.fakeBold)
         assertNull(override.typeface)
         // 倾斜量镜像完整模式 HighlightDraw.obtainTextPaint 的 textSkewX
         assertEquals(-0.25f, SYNTHETIC_ITALIC_SKEW_X, 0f)
