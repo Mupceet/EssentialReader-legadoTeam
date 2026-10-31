@@ -1,19 +1,19 @@
 {
-  "tag_name": "3.26102622",
-  "name": "moben-legado_3.26102622",
-  "body": "本次更新：墨水屏模式支持高亮规则渲染——完整模式配置的规则样式在墨水屏上按灰度呈现（彩色按亮度换算并保留透明度），编辑规则即时生效。\n\n- 支持的规则样式：字色、背景色（矩形/圆角/胶囊底呈普通高亮带，荧光/半高/基线底呈荧光笔下半带）、下划线（实线/虚线/波浪/双线，颜色、粗细、与文字的距离同步）、删除线、自定义字体、字号、斜体、加粗\n- 带字体或字号覆盖的规则文字与排版留宽匹配：改度量的规则自动触发重新分页，字形画满引擎测量的位置不再溢出或留空\n- 修复命中字距的段前留白被并入首字：高亮带、下划线与长按选区不再盖到空白上\n- 修复删除线、荧光笔两种下划线款式此前在墨水屏被画成普通实线下划线\n- 暂不支持（明示降级）：规则自带字距、着重号与边框、SVG 花色下划线（显示为实线）、完整模式手动高亮（墨水屏划线走书签笔记体系）",
+  "tag_name": "3.26103122",
+  "name": "moben-legado_3.26103122",
+  "body": "本次更新：墨水屏与完整模式两套阅读界面切换不再跳动——排版视口、系统栏避让与页眉页脚带高逐像素同源；页眉页脚分隔线布局跟随完整模式配置，墨水屏界面不绘制分隔线。\n\n- 阅读器画布改为全屏窗口加内容边距避让：状态栏、导航栏与刘海避让与完整模式同一策略同一配置，切换阅读界面不再因视口差异重排跳页\n- 页眉页脚分隔线：布局预留跟随完整模式「显示分隔线」配置，墨水屏界面不绘制；页眉时间/电量与页脚页码、页脚字号与进度条等带内元素与完整模式带高对齐\n- 无封面书籍文字封面重设计：书名大字竖排「书卷式」贴右缘、作者竖排落款、封面字体与界面一致，列表、搜索、详情等场景统一版式；分组封面计数标留白优化\n- 首页顶栏改版：书架标题即筛选入口、搜索收敛为常驻图标、标题放大，进入分组显示面包屑\n- 屏保图按设备真实屏幕尺寸生成，不再按固定画布拉伸\n- 修复阅读页页眉时间/电量与页脚页码在字号调大后画出屏幕、页脚字号与设置值不一致\n- 修复搜索历史条目排版",
   "prerelease": false,
   "assets": [
     {
-      "browser_download_url": "https://github.com/Mupceet/EssentialReader-legadoTeam/releases/download/3.26102622/moben-legado_3.26102622_universal_vc38546.apk",
+      "browser_download_url": "https://github.com/Mupceet/EssentialReader-legadoTeam/releases/download/3.26103122/moben-legado_3.26103122_universal_vc38547.apk",
       "content_type": "application/vnd.android.package-archive",
-      "created_at": "2026-10-26T14:33:31Z",
+      "created_at": "2026-10-31T14:48:26Z",
       "download_count": 0,
-      "id": 678427832,
-      "name": "moben-legado_3.26102622_universal_vc38546.apk",
-      "size": 29125857,
+      "id": 695646486,
+      "name": "moben-legado_3.26103122_universal_vc38547.apk",
+      "size": 29142996,
       "state": "uploaded",
-      "url": "https://api.github.com/repos/Mupceet/EssentialReader-legadoTeam/releases/assets/678427832"
+      "url": "https://api.github.com/repos/Mupceet/EssentialReader-legadoTeam/releases/assets/695646486"
     }
   ]
 }
