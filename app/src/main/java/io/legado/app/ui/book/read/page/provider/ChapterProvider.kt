@@ -744,17 +744,6 @@ object ChapterProvider {
     }
 
     /**
-     * E-Ink 模式页眉/页脚装饰预留（dp，非 E-Ink 恒 0）。
-     *
-     * 完整模式的 tip 画在 PageView 视图层（页眉/页脚在引擎视口之外，
-     * 不占排版）；E-Ink 模式无 View 层，页眉页脚由模块叠加绘制在排版
-     * 画布顶部/底部预留带内——本预留使正文排版基线让出该带。由 E-Ink
-     * 桥接层设置（进入时设值、退出清零），upLayout 并入上下边距。
-     */
-    var einkHeaderReserveDp = 0
-    var einkFooterReserveDp = 0
-
-    /**
      * 更新绘制尺寸
      */
     fun upLayout() {
@@ -777,9 +766,9 @@ object ChapterProvider {
         }
 
         paddingLeft = ReadBookConfig.paddingLeft.dpToPx()
-        paddingTop = ReadBookConfig.paddingTop.dpToPx() + einkHeaderReserveDp.dpToPx()
+        paddingTop = ReadBookConfig.paddingTop.dpToPx()
         paddingRight = ReadBookConfig.paddingRight.dpToPx()
-        paddingBottom = ReadBookConfig.paddingBottom.dpToPx() + einkFooterReserveDp.dpToPx()
+        paddingBottom = ReadBookConfig.paddingBottom.dpToPx()
         visibleWidth = if (doublePage) {
             viewWidth / 2 - paddingLeft - paddingRight
         } else {
@@ -806,9 +795,9 @@ object ChapterProvider {
 
     private fun setFallbackLayout() {
         paddingLeft = 20.dpToPx()
-        paddingTop = 5.dpToPx() + einkHeaderReserveDp.dpToPx()
+        paddingTop = 5.dpToPx()
         paddingRight = 20.dpToPx()
-        paddingBottom = 5.dpToPx() + einkFooterReserveDp.dpToPx()
+        paddingBottom = 5.dpToPx()
         visibleWidth = if (doublePage) {
             viewWidth / 2 - paddingLeft - paddingRight
         } else {

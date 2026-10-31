@@ -85,21 +85,13 @@ internal object HostStyleCatalog {
             ),
             // 页眉/页脚字号：宿主单键 ReadTipConfig.tipTextSize（值域/默认
             // 同宿主 minTextSize..maxTextSize，页眉页脚同字号——模块统一
-            // 拖动条写两侧）；带高随字号伸缩（syncTipReserves）影响分页
+            // 拖动条写两侧）；带高随字号伸缩（syncTipExtents）影响分页
             stepped(Ids.HEADER_SIZE, 5f, 50f, 12f),
             stepped(Ids.FOOTER_SIZE, 5f, 50f, 12f),
-            ReaderStyleParam.Toggle(
-                id = Ids.HEADER_DIVIDER,
-                available = true,
-                affectsLayout = false,
-                default = false,
-            ),
-            ReaderStyleParam.Toggle(
-                id = Ids.FOOTER_DIVIDER,
-                available = true,
-                affectsLayout = false,
-                default = true,
-            ),
+            // 页眉/页脚分隔线不声明（模块 UI 整行隐藏）：E-Ink 模式不渲染
+            // 分隔线（模块 tip 绘制按 style.headerDivider/footerDivider ==
+            // true 才画，snapshotStyle 恒发 false），宿主 showHeaderLine/
+            // showFooterLine 键保留给完整模式，两模式互不干扰
             stepped(Ids.BODY_PADDING_TOP, 0f, 48f, 6f),
             stepped(Ids.BODY_PADDING_BOTTOM, 0f, 48f, 6f),
             stepped(Ids.BODY_PADDING_LEFT, 0f, 64f, 16f),

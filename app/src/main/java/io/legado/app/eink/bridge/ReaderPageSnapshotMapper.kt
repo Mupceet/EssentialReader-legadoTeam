@@ -31,7 +31,10 @@ import kotlin.math.roundToInt
  *
  * 引擎排版完成后把页面映射为 [ReaderPageSnapshot]：上游排版结构的字段
  * 漂移由本映射器消化，模块画布只有一份绘制实现。API35+ 的逐字字距半格
- * 补偿在映射期算进 x 坐标，模块不再感知。
+ * 补偿在映射期算进 x 坐标，模块不再感知。坐标口径：引擎视口 = 内容区
+ * （系统栏避让与页眉带在视口外扣除，见 ReaderEngineImpl.updateViewSize），
+ * 列坐标为内容区坐标，映射期统一补「避让 + 页眉带」偏移，快照按模块
+ * 全屏画布的窗口坐标发射。
  *
  * 画笔规格只拷贝测量耦合参数（字号/字距/字体）——快照列坐标是引擎按
  * 这些参数测量的，模块必须按同值绘制才不错位；阴影等纯视觉效果不跨桥
@@ -68,6 +71,12 @@ internal object ReaderPageSnapshotMapper {
             contentSpec = ChapterProvider.contentPaint.copyPaintSpec(),
             sdkInt = Build.VERSION.SDK_INT,
             imageLoader = ::defaultImageLoader,
+            // 窗口坐标换算：引擎视口 = 内容区（避让边距 + 页眉带在视口外
+            // 扣除，见 ReaderEngineImpl.updateViewSize），列坐标是内容区
+            // 坐标，补上偏移后与模块全屏画布的窗口坐标约定对齐
+            offsetX = ReaderEngineImpl.contentPadding.left.toFloat(),
+            offsetY = ReaderEngineImpl.contentPadding.top +
+                ReaderEngineImpl.headerDecorationExtentPx,
             bookmarkBadge = MarksEngineImpl.supportsBookmarks &&
                 rows.any { row ->
                     row.bookText.isEmpty() &&
@@ -234,7 +243,14 @@ internal object ReaderPageSnapshotMapper {
         val chunkOverrides: List<ReaderChunkPaintOverride?>,
     )
 
-    /** 纯函数核心（单测直接喂规格与 SDK 版本）。 */
+    /**
+     * 纯函数核心（单测直接喂规格与 SDK 版本）。
+     *
+     * [offsetX]/[offsetY]：引擎内容区坐标 → 模块窗口坐标的偏移（系统栏
+     * 避让 + 页眉带，生产入口按 [ReaderEngineImpl.contentPadding] 与
+     * headerDecorationExtentPx 计算；默认 0 = 内容区坐标直出，既有单测
+     * 锚定基准）。
+     */
     internal fun mapWithSpecs(
         page: TextPage,
         titleSpec: ReaderPaintSpec,
@@ -245,6 +261,8 @@ internal object ReaderPageSnapshotMapper {
         markings: List<ReaderMarkingAnchor> = emptyList(),
         /** 页级规则样式（行 × 列矩阵，与 page.lines/line.columns 平行；null = 无）。 */
         ruleStyles: List<List<HighlightStyle?>>? = null,
+        offsetX: Float = 0f,
+        offsetY: Float = 0f,
     ): ReaderPageSnapshot {
         val images = ArrayList<ReaderImageSlot>()
         // 行段（章内位置 → 行文本）与待组装行：循环后锚点校验再产装饰
@@ -274,7 +292,7 @@ internal object ReaderPageSnapshotMapper {
                 when (column) {
                     is TextColumn -> {
                         chunks.add(column.charData)
-                        xs.add(column.start + halfSpacing)
+                        xs.add(column.start + halfSpacing + offsetX)
                         positions.add(position)
                         position += column.charData.length
                         val ruleStyle = ruleStyles?.getOrNull(lineIndex)?.getOrNull(columnIndex)
@@ -290,10 +308,10 @@ internal object ReaderPageSnapshotMapper {
                     is ImageColumn -> {
                         images.add(
                             ReaderImageSlot(
-                                x0 = column.start,
-                                x1 = column.end,
-                                lineTop = line.lineTop,
-                                lineBottom = line.lineBottom,
+                                x0 = column.start + offsetX,
+                                x1 = column.end + offsetX,
+                                lineTop = line.lineTop + offsetY,
+                                lineBottom = line.lineBottom + offsetY,
                                 lineHeight = line.height,
                                 fullLine = line.isImage,
                                 loader = imageLoader(column.src),
@@ -318,13 +336,13 @@ internal object ReaderPageSnapshotMapper {
                 segmentTexts.add(chunks.joinToString(""))
                 pendingLines.add(
                     PendingLine(
-                        baseY = line.lineBase,
+                        baseY = line.lineBase + offsetY,
                         isTitle = line.isTitle,
                         chunks = chunks,
                         x = xs.toFloatArray(),
                         chapterPositions = positions.toIntArray(),
-                        top = line.lineTop,
-                        bottom = line.lineBottom,
+                        top = line.lineTop + offsetY,
+                        bottom = line.lineBottom + offsetY,
                         startPos = line.chapterPosition,
                         textLen = chunks.sumOf { it.length },
                         bandSignatures = bandSignatures,

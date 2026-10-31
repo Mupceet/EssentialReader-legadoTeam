@@ -120,20 +120,12 @@ class EInkMainActivity : EInkHostActivity() {
     override fun onExitToFullMode(context: Context) {
         // 完整模式（View UI）——导入导出等管理功能在完整模式中完成，
         // 再次启用需把主题模式切回 "4"（宿主主题设置的分流键）
-        // 引擎装饰预留先清零（ChapterProvider 进程级单例，残留会使
-        // 完整模式排版让位）
-        EInkBridge.resetEngineDecorations()
+        // （E-Ink 几何经 extent 工厂实时计算，引擎侧无残留状态需清理）
         context.putPrefString(PreferKey.themeMode, "0")
         AppConfig.themeMode = "0"
         context.startActivity<MainActivity> {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK)
         }
-    }
-
-    override fun onDestroy() {
-        // 兜底清理（返回键退出等未经 onExitToFullMode 的路径）
-        EInkBridge.resetEngineDecorations()
-        super.onDestroy()
     }
 }

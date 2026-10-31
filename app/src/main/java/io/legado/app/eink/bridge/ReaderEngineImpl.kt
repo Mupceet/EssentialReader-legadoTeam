@@ -42,6 +42,7 @@ import io.legado.app.model.ReadBook
 import io.legado.app.model.localBook.LocalBook
 import io.legado.app.model.webBook.WebBook
 import io.legado.app.ui.book.read.page.provider.ChapterProvider
+import io.legado.app.ui.widget.BatteryView
 import io.legado.app.ui.login.SourceLoginJsExtensions
 import io.legado.app.utils.RealPathUtil
 import io.legado.app.utils.dpToPx
@@ -55,6 +56,7 @@ import java.util.Date
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 /** Book 快照实现。 */
 internal class ReaderBookSnapshotImpl(override val handle: BookHandle) : ReaderBookSnapshot {
@@ -386,8 +388,71 @@ internal object ReaderEngineImpl : ReaderEngine {
 
     // ---- 排版 ----
 
-    override fun updateViewSize(width: Int, height: Int) {
-        ChapterProvider.upViewSize(width, height)
+    /**
+     * E-Ink 画布输入（全屏窗口尺寸 + 系统栏避让内容边距）。引擎视口取
+     * 「内容区」：窗口扣除避让边距与页眉/页脚带预留——与完整模式
+     * ContentTextView 尺寸（窗口扣除占位 View/带后的内容区）同构，两套
+     * 阅读界面的引擎视口数值一致，共享章节缓存跨界面有效，切换不跳。
+     */
+    private var viewportWidth = 0
+    private var viewportHeight = 0
+
+    /** 最近一次解析的内容边距（映射期窗口坐标换算输入，[ReaderPageSnapshotMapper] 消费）。 */
+    internal var contentPadding = ReaderEngine.ReaderContentPadding()
+
+    /**
+     * 排版内容边距解析：与完整模式 PageView 占位 View 同一策略同一配置
+     * （vwStatusBar `isGone = hideStatusBar || 多窗`、vwNavigationBar
+     * `isGone = hideNavigationBar`、vwRoot 刘海避让随
+     * paddingDisplayCutouts 且顶部只在状态栏占位消失时避让）——模块只交
+     * 忽略可见性的 insets 采样，策略单一事实源在宿主。
+     */
+    override fun resolveContentPadding(
+        insets: ReaderEngine.ReaderSystemBarInsets,
+        hideStatusBar: Boolean,
+    ): ReaderEngine.ReaderContentPadding {
+        val statusPlaceholderGone =
+            hideStatusBar || inMultiWindow()
+        val cutout = if (AppConfig.paddingDisplayCutouts) {
+            insets
+        } else {
+            ReaderEngine.ReaderSystemBarInsets()
+        }
+        return ReaderEngine.ReaderContentPadding(
+            left = cutout.cutoutLeftPx,
+            top = (if (statusPlaceholderGone) 0 else insets.statusBarTopPx) +
+                (if (statusPlaceholderGone) cutout.cutoutTopPx else 0),
+            right = cutout.cutoutRightPx,
+            bottom = (if (ReadBookConfig.hideNavigationBar) 0 else insets.navigationBarBottomPx) +
+                cutout.cutoutBottomPx,
+        )
+    }
+
+    private fun inMultiWindow(): Boolean {
+        val activity = EInkBridge.hostActivity() ?: return false
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && activity.isInMultiWindowMode
+    }
+
+    /** 全屏画布输入 → 引擎视口（内容区尺寸）：扣除避让边距与页眉/页脚带预留。 */
+    private fun applyViewport() {
+        if (viewportWidth <= 0 || viewportHeight <= 0) return
+        ChapterProvider.upViewSize(
+            viewportWidth - contentPadding.left - contentPadding.right,
+            viewportHeight - contentPadding.top - contentPadding.bottom -
+                headerDecorationExtentPx.roundToInt() -
+                footerDecorationExtentPx.roundToInt(),
+        )
+    }
+
+    override fun updateViewSize(
+        width: Int,
+        height: Int,
+        contentPadding: ReaderEngine.ReaderContentPadding,
+    ) {
+        this.viewportWidth = width
+        this.viewportHeight = height
+        this.contentPadding = contentPadding
+        applyViewport()
     }
 
     /**
@@ -430,17 +495,17 @@ internal object ReaderEngineImpl : ReaderEngine {
         style.titleBottomSpacing?.let { ReadBookConfig.titleBottomSpacing = it }
         style.headerMode?.let { ReadTipConfig.headerMode = it }
         style.footerVisible?.let { ReadTipConfig.footerMode = if (it) 0 else 1 }
-        style.headerDivider?.let { ReadBookConfig.showHeaderLine = it }
-        style.footerDivider?.let { ReadBookConfig.showFooterLine = it }
+        // 分隔线不跨桥（目录未声明，模块不发射）：E-Ink 模式不渲染分隔线，
+        // showHeaderLine/showFooterLine 保留给完整模式
         // 页眉/页脚字号：宿主单键 ReadTipConfig.tipTextSize（页眉页脚同
         // 字号）；模块统一写两侧同值，header/footer 任一在场即写（防御
         // 只写单侧的调用方），setter 内按宿主值域钳制
         style.headerSize?.let { ReadTipConfig.tipTextSize = it }
             ?: style.footerSize?.let { ReadTipConfig.tipTextSize = it }
         ReadBookConfig.save()
-        // tip 字号/内边距可能刚被写入：带高随之同步（行高随字号伸缩，
-        // upLayout 重算分页几何）
-        syncTipReserves()
+        // tip 字号/内边距可能刚被写入：带高随之伸缩，视口重报经重排闭环
+        // 生效（upStyle 内部自带 upLayout 刷新配置边距）
+        syncTipExtents()
         ChapterProvider.upStyle()
     }
 
@@ -533,7 +598,7 @@ internal object ReaderEngineImpl : ReaderEngine {
         get() = AppConfig.pageTouchSlop
 
     override fun headerFooterVisibility(): ReaderHeaderFooterVisibility =
-        tipVisibility().also(::syncTipReserves)
+        tipVisibility().also { syncTipExtents() }
 
     /** 页眉/页脚可见性（宿主 PageView.upTipStyle 同构：默认档页眉随「隐藏状态栏」接管/让位）。 */
     private fun tipVisibility() = ReaderHeaderFooterVisibility(
@@ -546,45 +611,94 @@ internal object ReaderEngineImpl : ReaderEngine {
     )
 
     /**
-     * E-Ink tip 带预留同步：带随可见性动态归零（完整模式 tip 为 View 层带，
-     * 隐藏即让位正文；E-Ink 并入引擎边距实现同语义——正文起点 = 带底 +
-     * 正文配置边距，带底即 extent 端口值，两侧严格一致）。
-     *
-     * 带宽 = tip 内边距 + 行高（页脚另加模块 2dp 进度条）——行高随页眉/
-     * 页脚字号设置伸缩（[EInkBridge.tipRowDp]，宿主 tipTextSize 同源），
-     * 模块在带内扣除同样的内边距后按配置字号渲染（行需求钳制保字形）。
-     *
+     * tip 带几何变化后的视口重报（带高 = 带预留，随可见性/字号/内边距/
+     * 分隔线配置伸缩，经 extent 工厂实时计算无引擎侧状态）：变化经
+     * upViewSize 的视口重排闭环生效（notifyViewSizeChange → UP_CONFIG[5]）。
      * 同步点：headerFooterVisibility（VM init/翻页/开关切换）、applyStyle
-     * （字号/tip 内边距写入后）、EInkBridge.install。upLayout 幂等（视口未
-     * 就绪时安全跳过，后续 updateViewSize 会带上预留重算）。
+     * （字号/tip 内边距写入后）、EInkBridge.install。幂等（视口未知时
+     * 安全跳过，后续 updateViewSize 会带上新带高重算）。
      */
-    internal fun syncTipReserves(visibility: ReaderHeaderFooterVisibility = tipVisibility()) {
-        val config = ReadBookConfig.durConfig
-        ChapterProvider.einkHeaderReserveDp = if (visibility.headerVisible) {
-            config.headerPaddingTop + EInkBridge.tipRowDp() + config.headerPaddingBottom
-        } else {
-            0
-        }
-        ChapterProvider.einkFooterReserveDp = if (visibility.footerVisible) {
-            EInkBridge.TIP_PROGRESS_BAR_DP +
-                config.footerPaddingTop + EInkBridge.tipRowDp() + config.footerPaddingBottom
-        } else {
-            0
-        }
-        ChapterProvider.upLayout()
+    internal fun syncTipExtents() {
+        applyViewport()
     }
 
     /**
-     * 页眉/页脚装饰预留高度（px，排版坐标系）：与引擎布局消费的带预留同值
-     * （[syncTipReserves]）——模块页眉页脚按此高度定高叠加在画布顶部/底部，
-     * 带底即正文排版基线（正文配置边距在带下另算，与完整模式「View 层带 +
-     * 内容区内边距」的叠加几何一致）；带隐藏时为 0，正文随之上移。
+     * 页眉/页脚装饰预留高度（px，排版坐标系）：**宿主完整模式 tip 带的实际
+     * 布局结果**——配置内边距（llHeader/llFooter 的 setPadding）+ tip View
+     * 实测高度（与完整模式同款 [BatteryView]：4/3/6/3dp 自带内边距、
+     * API33+ fallbackLineSpacing 关闭、单行、引擎字体 + tipTextSize，
+     * upTipStyle 同参数真实 measure）+ 分隔线（完整模式 0.5dp
+     * vw_top/vw_bottom_divider，按 showHeaderLine/showFooterLine 配置计入
+     * 布局，像素取整同 XML 解析口径）。带高与完整模式逐像素一致，引擎视口
+     * （applyViewport 扣减）两界面数值一致，切换不跳。带隐藏时为 0。
+     *
+     * 布局尊重配置、绘制尊重模式：分隔线空间恒为带的一部分（配置开），
+     * E-Ink 不绘制（快照样式 headerDivider/footerDivider 恒 false，模块
+     * 按 true 才画）——分隔线位留在带内（页眉带底/页脚带顶），文本锚点
+     * （顶锚/底锚）不受影响。
      */
     override val headerDecorationExtentPx: Float
-        get() = ChapterProvider.einkHeaderReserveDp.dpToPx().toFloat()
+        get() = if (tipVisibility().headerVisible) {
+            tipBandExtentPx(
+                ReadBookConfig.durConfig.headerPaddingTop,
+                ReadBookConfig.durConfig.headerPaddingBottom,
+                ReadBookConfig.showHeaderLine,
+            ).toFloat()
+        } else 0f
 
     override val footerDecorationExtentPx: Float
-        get() = ChapterProvider.einkFooterReserveDp.dpToPx().toFloat()
+        get() = if (tipVisibility().footerVisible) {
+            tipBandExtentPx(
+                ReadBookConfig.durConfig.footerPaddingTop,
+                ReadBookConfig.durConfig.footerPaddingBottom,
+                ReadBookConfig.showFooterLine,
+            ).toFloat()
+        } else 0f
+
+    /** 分隔线厚度（dp，完整模式 vw_top/vw_bottom_divider 同值）。 */
+    private const val TIP_DIVIDER_DP = 0.5f
+
+    /**
+     * tip 带高（px）= 宿主配置内边距 + tip View 实测高 + 分隔线（按配置）。
+     * 分隔线像素取整同 XML layout_height 的 complexToDimensionPixelSize 口径。
+     */
+    private fun tipBandExtentPx(paddingTopDp: Int, paddingBottomDp: Int, dividerVisible: Boolean): Int =
+        paddingTopDp.dpToPx() + measuredTipRowPx() + paddingBottomDp.dpToPx() +
+            (if (dividerVisible) tipDividerPx() else 0)
+
+    private fun tipDividerPx(): Int =
+        (TIP_DIVIDER_DP * appCtx.resources.displayMetrics.density + 0.5f).toInt()
+
+    /** 同参数实测缓存（字体实例/字号/密度任一变化即失效；extent 端口与视口重报双线程读）。 */
+    private var measuredTipRowCache: Pair<Triple<Typeface?, Int, Float>, Int>? = null
+
+    /**
+     * tip View 实测高度（px，含 [BatteryView] 构造器自带内边距）：与完整
+     * 模式 upTipStyle 同参数（isBattery=false → 引擎字体、tipTextSize、
+     * 单行 + 省略号，XML 同款），真实 measure 保证与 View 层带同像素。
+     */
+    @Synchronized
+    private fun measuredTipRowPx(): Int {
+        val typeface = ChapterProvider.typeface
+        val sizeSp = ReadTipConfig.tipTextSize
+        val density = appCtx.resources.displayMetrics.density
+        measuredTipRowCache?.takeIf {
+            it.first.first === typeface && it.first.second == sizeSp && it.first.third == density
+        }?.let { return it.second }
+        val view = BatteryView(appCtx)
+        view.isBattery = false
+        view.typeface = typeface ?: Typeface.DEFAULT
+        view.textSize = sizeSp.toFloat()
+        view.setSingleLine(true)
+        view.ellipsize = android.text.TextUtils.TruncateAt.END
+        view.measure(
+            android.view.View.MeasureSpec.makeMeasureSpec(0, android.view.View.MeasureSpec.UNSPECIFIED),
+            android.view.View.MeasureSpec.makeMeasureSpec(0, android.view.View.MeasureSpec.UNSPECIFIED),
+        )
+        val px = view.measuredHeight
+        measuredTipRowCache = Triple(typeface, sizeSp, density) to px
+        return px
+    }
 
     /**
      * 页眉/页脚有效字体：本宿主无独立页眉/页脚字体键——按契约
@@ -719,8 +833,10 @@ private fun ReadBookConfig.snapshotStyle(): ReaderTextStyle = ReaderTextStyle(
     // 页眉/页脚字号：宿主单键两侧同读（getter 已按值域钳制）
     headerSize = ReadTipConfig.tipTextSize,
     footerSize = ReadTipConfig.tipTextSize,
-    headerDivider = showHeaderLine,
-    footerDivider = showFooterLine,
+    // 分隔线恒 false：E-Ink 模式不渲染分隔线（模块 tip 绘制按 true 才画，
+    // 目录亦未声明——宿主 showHeaderLine/showFooterLine 与完整模式互不影响）
+    headerDivider = false,
+    footerDivider = false,
 )
 
 /**

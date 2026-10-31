@@ -8,7 +8,6 @@ import io.legado.app.eink.contract.GlobalSettings
 import io.legado.app.eink.contract.PageTurnRippleMode
 import io.legado.app.help.config.AppConfig
 import io.legado.app.help.config.ReadBookConfig
-import io.legado.app.help.config.ReadTipConfig
 import io.legado.app.ui.book.read.page.provider.ChapterProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -63,18 +62,6 @@ private const val KEY_FONT_SCALE = "fontScale"
 object EInkBridge {
 
     /**
-     * E-Ink tip 行高（dp）：随页眉/页脚字号设置（ReadTipConfig.tipTextSize，
-     * 完整模式同键）同步伸缩——行高 = 字号 × 20/14，是模块推导口径
-     * 「可用高度 × 14/20 = 字号」的反演（默认 12sp → 17dp，与历史常量
-     * 一致，既有配置零漂移）。模块侧配置字号渲染仍经行需求钳制，极端
-     * 字体行高超出时字形完整优先（字号微缩）。
-     */
-    internal fun tipRowDp(): Int = ReadTipConfig.tipTextSize * 20 / 14
-
-    /** 模块页脚顶部的自动翻页进度条高度（dp，带宽预算内扣除）。 */
-    internal const val TIP_PROGRESS_BAR_DP = 2
-
-    /**
      * 当前在前的 E-Ink 宿主 Activity（EinkMainActivity onStart/onStop 挂载）。
      * 端口实现弹出宿主 UI 层（段评半屏 WebView 等宿主 DialogFragment）的事务
      * 宿主与生命周期作用域来源；无前台活动时（退后台/已销毁）相关分派
@@ -111,19 +98,11 @@ object EInkBridge {
         // 封面开关为快照状态缓存：每次进入 E-Ink 与宿主设置对齐，
         // 防止完整模式（或上一会话）修改后的陈旧值
         GlobalSettingsImpl.syncUseDefaultCover()
-        // tip 带预留按当前可见性同步（引擎排版避让页眉/页脚带）
-        ReaderEngineImpl.syncTipReserves()
+        // tip 带高按当前配置重报（extent 工厂实时计算，视口变化经重排
+        // 闭环生效；视口未知时安全跳过）
+        ReaderEngineImpl.syncTipExtents()
         // 应用字体快照与偏好记录对齐（副本可能被系统清理）
         EinkAppFonts.reload()
-    }
-
-    /**
-     * 清零引擎侧 E-Ink 装饰预留（回完整模式前/入口销毁时调用——
-     * ChapterProvider 为进程级单例，残留预留会使完整模式排版让位）。
-     */
-    fun resetEngineDecorations() {
-        ChapterProvider.einkHeaderReserveDp = 0
-        ChapterProvider.einkFooterReserveDp = 0
     }
 }
 
@@ -299,6 +278,10 @@ private object GlobalSettingsImpl : GlobalSettings {
             ReadBookConfig.hideStatusBar = value
             appCtx.putPrefBoolean(PreferKey.hideStatusBar, value)
         }
+
+    /** 只读（同键同源完整模式「隐藏导航栏」，[ReadBookConfig] 启动期装载；在宿主阅读配置界面修改）。 */
+    override val hideNavigationBar: Boolean
+        get() = ReadBookConfig.hideNavigationBar
 
     /**
      * 段评气泡显示开关（E-Ink 自有偏好，默认开）：宿主引擎有完整段评
