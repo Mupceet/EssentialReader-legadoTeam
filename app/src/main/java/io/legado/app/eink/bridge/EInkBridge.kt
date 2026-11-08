@@ -17,8 +17,10 @@ import kotlinx.coroutines.launch
 import splitties.init.appCtx
 import io.legado.app.utils.getPrefBoolean
 import io.legado.app.utils.getPrefInt
+import io.legado.app.utils.getPrefString
 import io.legado.app.utils.putPrefBoolean
 import io.legado.app.utils.putPrefInt
+import io.legado.app.utils.putPrefString
 
 /**
  * E-Ink 自有偏好的专属 prefs 文件（模块 0.5.0 契约口径）：pullDownBookmark
@@ -47,6 +49,9 @@ private const val KEY_APP_FONT_COPY = "einkAppFontCopyPath"
 
 /** 段评气泡显示开关自有键（宿主引擎无总开关，E-Ink 侧自管，默认开）。 */
 private const val KEY_SHOW_REVIEW_BUBBLES = "einkShowReviewBubbles"
+
+/** 阅读界面「书源信息行」开关自有键（E-Ink 自有界面偏好，默认关）。 */
+private const val KEY_READER_SOURCE_INFO_BAR = "einkReaderSourceInfoBar"
 
 /** 本宿主完整模式无界面字体缩放设置：E-Ink 自管键（0 = 未设置，跟随系统）。 */
 private const val KEY_FONT_SCALE = "fontScale"
@@ -94,6 +99,7 @@ object EInkBridge {
             bookshelfGroupEngine = BookshelfGroupEngineImpl,
             backupSyncEngine = BackupSyncEngineImpl,
             pageTurnEffectEngine = PageTurnEffectEngineImpl,
+            bookSourceEngine = BookSourceEngineImpl,
         )
         // 封面开关为快照状态缓存：每次进入 E-Ink 与宿主设置对齐，
         // 防止完整模式（或上一会话）修改后的陈旧值
@@ -246,6 +252,35 @@ private object GlobalSettingsImpl : GlobalSettings {
             appCtx.putPrefBoolean(PreferKey.volumeKeyPage, value)
         }
 
+    /**
+     * 鼠标滚轮翻页（转发宿主键 mouseWheelPage，与完整模式同键共享；
+     * 宿主键默认开——[AppConfig.mouseWheelPage] 逐次读 SP 实时档）。
+     * eink 模式生效范围更广：滚轮与音量键同套全局语义（阅读页 + 各
+     * 分页列表），完整模式仅阅读页。
+     */
+    override var mouseWheelPage: Boolean
+        get() = AppConfig.mouseWheelPage
+        set(value) {
+            appCtx.putPrefBoolean(PreferKey.mouseWheelPage, value)
+        }
+
+    /**
+     * 自定义上一页/下一页键码串（转发宿主键 prevKeys/nextKeys，与完整
+     * 模式 PageKeyDialog 同键共享——eink 侧「翻页设置」录入的键在完整
+     * 模式同样生效）。存储格式同宿主：逗号分隔十进制键码，实时档读取。
+     */
+    override val prevKeys: String
+        get() = appCtx.getPrefString(PreferKey.prevKeys) ?: ""
+
+    override val nextKeys: String
+        get() = appCtx.getPrefString(PreferKey.nextKeys) ?: ""
+
+    /** 自定义翻页键对写入（两方向一次提交；本宿主 SP 双键写为顺序两笔，apply 合并落盘）。 */
+    override fun setPageKeys(prevKeys: String, nextKeys: String) {
+        appCtx.putPrefString(PreferKey.prevKeys, prevKeys)
+        appCtx.putPrefString(PreferKey.nextKeys, nextKeys)
+    }
+
     /** 快照状态档：组合内读取订阅变化，切换后开关行与封面立即重组。 */
     override var useDefaultCover: Boolean
         get() = useDefaultCoverState.value
@@ -298,6 +333,18 @@ private object GlobalSettingsImpl : GlobalSettings {
 
     override val supportsReviewBubbles: Boolean
         get() = true
+
+    /**
+     * 阅读界面「书源信息行」开关（E-Ink 自有界面偏好，完整模式无对应
+     * 设置，默认关）：开启后阅读菜单展开期顶栏下方增加章节名 + 书源名
+     * 一行，书源具备登录/付费能力时书源名可点开执行登录与购买。
+     */
+    override var readerSourceInfoBar: Boolean
+        get() = einkSharedPreferences().getBoolean(KEY_READER_SOURCE_INFO_BAR, false)
+        set(value) {
+            einkSharedPreferences().edit()
+                .putBoolean(KEY_READER_SOURCE_INFO_BAR, value).apply()
+        }
 
     /**
      * 点击区域九宫格（E-Ink 自有偏好，不转发完整模式 clickAction* 键）：

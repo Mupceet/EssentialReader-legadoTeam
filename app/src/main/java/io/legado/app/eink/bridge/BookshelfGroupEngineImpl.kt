@@ -1,6 +1,7 @@
 package io.legado.app.eink.bridge
 
 import io.legado.app.R
+import io.legado.app.eink.R as EinkR
 import io.legado.app.constant.BookType
 import io.legado.app.data.appDb
 import io.legado.app.data.entities.Book
@@ -115,7 +116,7 @@ internal object BookshelfGroupEngineImpl : BookshelfGroupEngine {
             buildFilterUiModels(
                 noneCount = counts[BookGroup.IdAll] ?: 0,
                 counts = counts,
-                noneName = appCtx.getString(R.string.eink_shelf_filter_none),
+                noneName = appCtx.getString(EinkR.string.eink_shelf_filter_none),
                 nameOf = ::filterNameOf,
             )
         }.distinctUntilChanged()

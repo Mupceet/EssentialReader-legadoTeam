@@ -22,6 +22,7 @@ import io.legado.app.eink.contract.ReaderFontSelection
 import io.legado.app.eink.contract.ReaderHeaderFooterVisibility
 import io.legado.app.eink.contract.ReaderPageSnapshot
 import io.legado.app.eink.contract.ReaderPrepareResult
+import io.legado.app.eink.contract.ReaderSourceInfo
 import io.legado.app.eink.contract.ReaderStyleCatalog
 import io.legado.app.eink.contract.ReaderSyncTrigger
 import io.legado.app.eink.contract.ReaderTextStyle
@@ -34,20 +35,26 @@ import io.legado.app.help.book.isLocalModified
 import io.legado.app.help.book.isOnLineTxt
 import io.legado.app.help.book.isType
 import io.legado.app.help.book.removeType
+import io.legado.app.help.book.update
 import io.legado.app.help.config.AppConfig
 import io.legado.app.help.config.ReadBookConfig
 import io.legado.app.help.config.ReadTipConfig
+import io.legado.app.help.source.getSourceType
 import io.legado.app.model.CacheBook
 import io.legado.app.model.ReadBook
 import io.legado.app.model.localBook.LocalBook
 import io.legado.app.model.webBook.WebBook
 import io.legado.app.ui.book.read.page.provider.ChapterProvider
+import io.legado.app.ui.browser.WebViewActivity
 import io.legado.app.ui.widget.BatteryView
 import io.legado.app.ui.login.SourceLoginJsExtensions
 import io.legado.app.utils.RealPathUtil
 import io.legado.app.utils.dpToPx
 import io.legado.app.utils.isContentScheme
+import io.legado.app.utils.isAbsUrl
+import io.legado.app.utils.isTrue
 import io.legado.app.utils.putPrefInt
+import io.legado.app.utils.startActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
@@ -589,6 +596,130 @@ internal object ReaderEngineImpl : ReaderEngine {
             } catch (e: Throwable) {
                 AppLog.put("执行图片链接click键值出错\n${e.localizedMessage}", e, true)
             }
+        }
+    }
+
+    // ---- 会话书源信息 ----
+
+    /**
+     * 当前会话书源能力信息（[ReaderEngine.sessionSourceInfo] 实现）：
+     * 从 ReadBook 会话即时读取；本地书/无会话/无书源返回 null（模块
+     * 信息行随之不渲染书源段，诚实降级）。
+     */
+    override fun sessionSourceInfo(): ReaderSourceInfo? {
+        val book = ReadBook.book ?: return null
+        if (book.isLocal) return null
+        val source = ReadBook.bookSource ?: return null
+        return ReaderSourceInfo(
+            url = source.bookSourceUrl,
+            name = source.bookSourceName,
+            hasLogin = !source.loginUrl.isNullOrBlank(),
+            hasPayAction = !source.getContentRule().payAction.isNullOrBlank(),
+        )
+    }
+
+    // ---- 章节付费 ----
+
+    /**
+     * 当前会话书源是否配置了章节付费动作（正文规则 payAction）。阅读
+     * 菜单「购买本章」入口按本值渲染；本地书/无书源恒 false。
+     */
+    override fun hasPayAction(): Boolean {
+        val book = ReadBook.book ?: return false
+        if (book.isLocal) return false
+        val source = ReadBook.bookSource ?: return false
+        return !source.getContentRule().payAction.isNullOrBlank()
+    }
+
+    /**
+     * 执行当前章付费动作（[ReaderEngine.requestChapterPay] 实现）：语义
+     * 复刻宿主完整模式 ReadBookActivity.payAction 的执行链——书源 JS
+     * 上下文里求值 payAction（SourceLoginJsExtensions 绑定 java/book/
+     * chapter/title/baseUrl）：
+     *  - 返回 URL：经宿主完整模式同款 [WebViewActivity] 打开付费页
+     *    （全屏，Cookie 随 sourceOrigin 绑定书源）；用户完成购买返回后
+     *    自行刷新本章见新内容；
+     *  - 返回 true：清当前章缓存 → 重拉目录替换入库（ReadBookViewModel
+     *    .loadChapterListAwait 同链）→ [ReadBook.onChapterListUpdated]
+     *    内部 loadContent(true) 重载当前章，内容经既有回调推送模块。
+     */
+    override suspend fun requestChapterPay(): ReaderEngine.ReaderPayResult {
+        val book = ReadBook.book
+            ?: return ReaderEngine.ReaderPayResult.Failed(
+                NoStackTraceException("无阅读会话")
+            )
+        if (book.isLocal) {
+            return ReaderEngine.ReaderPayResult.Failed(
+                NoStackTraceException("本地书籍无付费动作")
+            )
+        }
+        val source = ReadBook.bookSource
+            ?: return ReaderEngine.ReaderPayResult.Failed(
+                NoStackTraceException("no book source")
+            )
+        val payAction = source.getContentRule().payAction
+        if (payAction.isNullOrBlank()) {
+            return ReaderEngine.ReaderPayResult.Failed(
+                NoStackTraceException("no pay action")
+            )
+        }
+        val chapter = appDb.bookChapterDao.getChapter(book.bookUrl, ReadBook.durChapterIndex)
+            ?: return ReaderEngine.ReaderPayResult.Failed(
+                NoStackTraceException("no find chapter")
+            )
+        return try {
+            // JS 求值在调用方协程上下文（runScriptWithContext 随挂起让出）；
+            // java 绑定的宿主弹层（showBrowser 等）以 E-Ink 宿主 Activity
+            // 为事务宿主，同 dispatchImageAction 口径
+            val activity = EInkBridge.hostActivity()
+            val java = activity?.let { SourceLoginJsExtensions(it, source, BookType.text) }
+            val result = runScriptWithContext {
+                source.evalJS(payAction) {
+                    put("java", java)
+                    put("book", book)
+                    put("chapter", chapter)
+                    put("title", chapter.title)
+                    put("baseUrl", chapter.url)
+                    put("result", null)
+                    put("src", null)
+                }.toString()
+            }
+            when {
+                result.isAbsUrl() -> {
+                    val host = EInkBridge.hostActivity()
+                        ?: return ReaderEngine.ReaderPayResult.Failed(
+                            NoStackTraceException("宿主界面不在前台")
+                        )
+                    withContext(Dispatchers.Main) {
+                        host.startActivity<WebViewActivity> {
+                            putExtra("title", host.getString(io.legado.app.R.string.chapter_pay))
+                            putExtra("url", result)
+                            putExtra("sourceOrigin", source.bookSourceUrl)
+                            putExtra("sourceName", source.bookSourceName)
+                            putExtra("sourceType", source.getSourceType())
+                        }
+                    }
+                    ReaderEngine.ReaderPayResult.PayPageOpened
+                }
+
+                result.isTrue() -> {
+                    ReadBook.curTextChapter = null
+                    BookHelp.delContent(book, chapter)
+                    val chapters = WebBook.getChapterListAwait(source, book, true).getOrThrow()
+                    book.update()
+                    appDb.bookChapterDao.delByBook(book.bookUrl)
+                    appDb.bookChapterDao.insert(*chapters.toTypedArray())
+                    ReadBook.onChapterListUpdated(book)
+                    ReaderEngine.ReaderPayResult.ChapterRefreshed
+                }
+
+                else -> ReaderEngine.ReaderPayResult.Failed(
+                    NoStackTraceException("pay action returned $result")
+                )
+            }
+        } catch (e: Throwable) {
+            if (e is CancellationException) throw e
+            ReaderEngine.ReaderPayResult.Failed(e)
         }
     }
 
