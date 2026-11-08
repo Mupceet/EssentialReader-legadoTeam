@@ -1,19 +1,19 @@
 {
-  "tag_name": "3.26103122",
-  "name": "moben-legado_3.26103122",
-  "body": "本次更新：墨水屏与完整模式两套阅读界面切换不再跳动——排版视口、系统栏避让与页眉页脚带高逐像素同源；页眉页脚分隔线布局跟随完整模式配置，墨水屏界面不绘制分隔线。\n\n- 阅读器画布改为全屏窗口加内容边距避让：状态栏、导航栏与刘海避让与完整模式同一策略同一配置，切换阅读界面不再因视口差异重排跳页\n- 页眉页脚分隔线：布局预留跟随完整模式「显示分隔线」配置，墨水屏界面不绘制；页眉时间/电量与页脚页码、页脚字号与进度条等带内元素与完整模式带高对齐\n- 无封面书籍文字封面重设计：书名大字竖排「书卷式」贴右缘、作者竖排落款、封面字体与界面一致，列表、搜索、详情等场景统一版式；分组封面计数标留白优化\n- 首页顶栏改版：书架标题即筛选入口、搜索收敛为常驻图标、标题放大，进入分组显示面包屑\n- 屏保图按设备真实屏幕尺寸生成，不再按固定画布拉伸\n- 修复阅读页页眉时间/电量与页脚页码在字号调大后画出屏幕、页脚字号与设置值不一致\n- 修复搜索历史条目排版",
+  "tag_name": "3.26110814",
+  "name": "moben-legado_3.26110814",
+  "body": "",
   "prerelease": false,
   "assets": [
     {
-      "browser_download_url": "https://github.com/Mupceet/EssentialReader-legadoTeam/releases/download/3.26103122/moben-legado_3.26103122_universal_vc38547.apk",
+      "browser_download_url": "https://github.com/Mupceet/EssentialReader-legadoTeam/releases/download/3.26110814/moben-legado_3.26110814_universal_vc38548.apk",
       "content_type": "application/vnd.android.package-archive",
-      "created_at": "2026-10-31T14:48:26Z",
+      "created_at": "2026-11-08T06:35:26Z",
       "download_count": 0,
-      "id": 695646486,
-      "name": "moben-legado_3.26103122_universal_vc38547.apk",
-      "size": 29142996,
+      "id": 723129211,
+      "name": "moben-legado_3.26110814_universal_vc38548.apk",
+      "size": 29160841,
       "state": "uploaded",
-      "url": "https://api.github.com/repos/Mupceet/EssentialReader-legadoTeam/releases/assets/695646486"
+      "url": "https://api.github.com/repos/Mupceet/EssentialReader-legadoTeam/releases/assets/723129211"
     }
   ]
 }
