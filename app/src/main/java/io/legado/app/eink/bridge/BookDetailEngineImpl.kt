@@ -6,6 +6,7 @@ import io.legado.app.data.appDb
 import io.legado.app.data.entities.Book
 import io.legado.app.eink.contract.BookDetailEngine
 import io.legado.app.eink.contract.BookDetailPrefetchResult
+import io.legado.app.eink.contract.BookDetailResolved
 import io.legado.app.eink.contract.BookDetailUiModel
 import io.legado.app.eink.contract.BookHandle
 import io.legado.app.help.book.BookHelp
@@ -43,7 +44,7 @@ internal fun resolveDisplaySource(
  * 书籍详情端口实现：查找链转发 + 目录预取管线（对齐 View 版
  * 详情页的拉取时机）。
  *
- * 本上游差异：getDisplayIntro 返回可空（UiModel.displayIntro 为 String?）；
+ * 本上游差异：getDisplayIntro 返回可空（UiModel.intro 为 String?）；
  * getChapterListAwait 返回 Result（getOrThrow 解包）。
  */
 internal object BookDetailEngineImpl : BookDetailEngine {
@@ -52,8 +53,8 @@ internal object BookDetailEngineImpl : BookDetailEngine {
         bookUrl = bookUrl,
         name = name,
         displayAuthor = getRealAuthor(),
-        displayCover = getDisplayCover(),
-        displayIntro = getDisplayIntro(),
+        coverUrl = getDisplayCover(),
+        intro = getDisplayIntro(),
         displaySource = resolveDisplaySource(
             originName = originName,
             origin = origin,
@@ -73,7 +74,7 @@ internal object BookDetailEngineImpl : BookDetailEngine {
         name: String,
         author: String,
         bookUrl: String,
-    ): Pair<BookHandle, BookDetailUiModel>? {
+    ): BookDetailResolved? {
         val book = appDb.bookDao.getBook(name, author)
             ?: bookUrl.takeIf { it.isNotBlank() }?.let { url ->
                 appDb.bookDao.getBook(url)
@@ -81,7 +82,7 @@ internal object BookDetailEngineImpl : BookDetailEngine {
             }
             ?: appDb.searchBookDao.getFirstByNameAuthor(name, author)?.toBook()
             ?: return null
-        return BookHandleImpl(book) to book.toUiModel()
+        return BookDetailResolved(BookHandleImpl(book), book.toUiModel())
     }
 
     override suspend fun loadBookDetail(bookUrl: String): BookDetailUiModel? =

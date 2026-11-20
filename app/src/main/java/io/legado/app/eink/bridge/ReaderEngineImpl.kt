@@ -1,6 +1,9 @@
 package io.legado.app.eink.bridge
 
+import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Typeface
+import android.os.BatteryManager
 import android.os.Build
 import androidx.core.net.toUri
 import androidx.lifecycle.lifecycleScope
@@ -26,7 +29,10 @@ import io.legado.app.eink.contract.ReaderSourceInfo
 import io.legado.app.eink.contract.ReaderStyleCatalog
 import io.legado.app.eink.contract.ReaderSyncTrigger
 import io.legado.app.eink.contract.ReaderTextStyle
+import io.legado.app.eink.contract.ReaderTipSlotTexts
 import io.legado.app.eink.contract.ReaderTipTypefaces
+import io.legado.app.eink.contract.SessionShelfOpResult
+import io.legado.app.eink.contract.StartCacheResult
 import io.legado.app.exception.NoStackTraceException
 import io.legado.app.help.book.BookHelp
 import io.legado.app.help.book.addType
@@ -39,6 +45,9 @@ import io.legado.app.help.book.update
 import io.legado.app.help.config.AppConfig
 import io.legado.app.help.config.ReadBookConfig
 import io.legado.app.help.config.ReadTipConfig
+import io.legado.app.help.config.ReaderInfoPart
+import io.legado.app.help.config.ReaderInfoTemplate
+import io.legado.app.help.config.ReaderInfoValues
 import io.legado.app.help.source.getSourceType
 import io.legado.app.model.CacheBook
 import io.legado.app.model.ReadBook
@@ -192,6 +201,15 @@ internal object ReaderEngineImpl : ReaderEngine {
     override val currentChapterPageSize: Int
         get() = ReadBook.curTextChapter?.pageSize ?: 0
 
+    /**
+     * 当前章最近一次正文下载尝试失败且尚未成功（宿主 downloadFailChapters
+     * 信号）：「获取正文失败」类文案被引擎排版成普通页（非 error 态），
+     * 模块侧凭本信号识别失败页驱动网络恢复自愈。成功下载即逐章移除
+     * （ReadBook 同步维护），换书/重载整表清空，无需宿主额外复位。
+     */
+    override val currentChapterDownloadFailed: Boolean
+        get() = ReadBook.downloadFailChapters.containsKey(ReadBook.durChapterIndex)
+
     override fun currentPage(): ReaderPageSnapshot? {
         val chapter = ReadBook.curTextChapter ?: return null
         return chapter.getPage(ReadBook.durPageIndex)?.let(ReaderPageSnapshotMapper::map)
@@ -342,20 +360,20 @@ internal object ReaderEngineImpl : ReaderEngine {
         ReadBook.loadContent(ReadBook.durChapterIndex, resetPageOffset = false)
     }
 
-    override fun startCache(count: Int, cacheAll: Boolean): Boolean? {
-        val book = ReadBook.book ?: return null
-        if (book.isLocal) return false
+    override fun startCache(count: Int, cacheAll: Boolean): StartCacheResult {
+        val book = ReadBook.book ?: return StartCacheResult.NothingToCache
+        if (book.isLocal) return StartCacheResult.LocalBook
         val end = if (cacheAll) {
             book.totalChapterNum - 1
         } else {
             min(ReadBook.durChapterIndex + count, book.totalChapterNum - 1)
         }
         CacheBook.start(appCtx, book, ReadBook.durChapterIndex, end)
-        return true
+        return StartCacheResult.Started
     }
 
-    override suspend fun addSessionBookToShelf(): Boolean? {
-        val book = ReadBook.book ?: return null
+    override suspend fun addSessionBookToShelf(): SessionShelfOpResult {
+        val book = ReadBook.book ?: return SessionShelfOpResult.NotApplicable
         return try {
             if (book.isType(BookType.notShelf)) {
                 book.removeType(BookType.notShelf)
@@ -364,32 +382,32 @@ internal object ReaderEngineImpl : ReaderEngine {
                 }
                 ReadBook.inBookshelf = true
                 book.save()
-                true
+                SessionShelfOpResult.Success
             } else {
-                null
+                SessionShelfOpResult.NotApplicable
             }
         } catch (e: CancellationException) {
             throw e
-        } catch (_: Throwable) {
-            false
+        } catch (e: Throwable) {
+            SessionShelfOpResult.Failure(e)
         }
     }
 
-    override suspend fun removeSessionBookFromShelf(): Boolean? {
-        val book = ReadBook.book ?: return null
+    override suspend fun removeSessionBookFromShelf(): SessionShelfOpResult {
+        val book = ReadBook.book ?: return SessionShelfOpResult.NotApplicable
         return try {
             if (!book.isType(BookType.notShelf)) {
                 book.addType(BookType.notShelf)
                 ReadBook.inBookshelf = false
                 book.save()
-                true
+                SessionShelfOpResult.Success
             } else {
-                null
+                SessionShelfOpResult.NotApplicable
             }
         } catch (e: CancellationException) {
             throw e
-        } catch (_: Throwable) {
-            false
+        } catch (e: Throwable) {
+            SessionShelfOpResult.Failure(e)
         }
     }
 
@@ -502,8 +520,10 @@ internal object ReaderEngineImpl : ReaderEngine {
         style.titleBottomSpacing?.let { ReadBookConfig.titleBottomSpacing = it }
         style.headerMode?.let { ReadTipConfig.headerMode = it }
         style.footerVisible?.let { ReadTipConfig.footerMode = if (it) 0 else 1 }
-        // 分隔线不跨桥（目录未声明，模块不发射）：E-Ink 模式不渲染分隔线，
-        // showHeaderLine/showFooterLine 保留给完整模式
+        // 分隔线（0.8.2 起目录协商）：写宿主共享键，带高按配置伸缩，
+        // syncTipExtents 重报视口闭环生效；模块按快照样式同值画线
+        style.headerDivider?.let { ReadBookConfig.showHeaderLine = it }
+        style.footerDivider?.let { ReadBookConfig.showFooterLine = it }
         // 页眉/页脚字号：宿主单键 ReadTipConfig.tipTextSize（页眉页脚同
         // 字号）；模块统一写两侧同值，header/footer 任一在场即写（防御
         // 只写单侧的调用方），setter 内按宿主值域钳制
@@ -730,6 +750,58 @@ internal object ReaderEngineImpl : ReaderEngine {
 
     override fun headerFooterVisibility(): ReaderHeaderFooterVisibility =
         tipVisibility().also { syncTipExtents() }
+
+    /**
+     * 页眉/页脚六槽最终显示文本（完整模式 PageView 同源解析）：槽位配置
+     * （自定义模板优先、遗留档位经 ReaderInfoTemplate.fromLegacy 折算）逐槽
+     * 经 [renderTipSlotText] 解析为纯文本。可见性不在本口径内
+     * （headerFooterVisibility 另行协商），模块按其门控绘制。
+     *
+     * 模块分钟级时钟高频调用：纯查询、不抛异常（读不到页面/电量给默认值），
+     * 数值口径同 PageView.setProgress/upTime/upBattery（未完成章总页数带
+     * `~` 前缀、电量缺数据给 100）。
+     */
+    override fun headerFooterTipTexts(): ReaderTipSlotTexts {
+        val values = currentReaderInfoValues()
+        fun slot(template: String?, legacyTip: Int) =
+            renderTipSlotText(ReadTipConfig.effectiveTemplate(template, legacyTip), values)
+        return ReaderTipSlotTexts(
+            headerLeft = slot(ReadTipConfig.tipHeaderLeftTemplate, ReadTipConfig.tipHeaderLeft),
+            headerMiddle = slot(ReadTipConfig.tipHeaderMiddleTemplate, ReadTipConfig.tipHeaderMiddle),
+            headerRight = slot(ReadTipConfig.tipHeaderRightTemplate, ReadTipConfig.tipHeaderRight),
+            footerLeft = slot(ReadTipConfig.tipFooterLeftTemplate, ReadTipConfig.tipFooterLeft),
+            footerMiddle = slot(ReadTipConfig.tipFooterMiddleTemplate, ReadTipConfig.tipFooterMiddle),
+            footerRight = slot(ReadTipConfig.tipFooterRightTemplate, ReadTipConfig.tipFooterRight),
+        )
+    }
+
+    /** 页脚栏上下文数值（PageView.setProgress/upTime/upBattery 三处合成同构）。 */
+    private fun currentReaderInfoValues(): ReaderInfoValues {
+        val batteryIntent = appCtx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val level = batteryIntent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = batteryIntent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+        val battery = if (level >= 0 && scale > 0) level * 100 / scale else 100
+        val book = ReadBook.book
+        val chapter = ReadBook.curTextChapter
+        val page = chapter?.getPage(ReadBook.durPageIndex)
+        val totalPages = when {
+            chapter == null -> "0"
+            chapter.isCompleted -> chapter.pageSize.toString()
+            chapter.pageSize <= 0 -> "-"
+            else -> "~${chapter.pageSize}"
+        }
+        return ReaderInfoValues(
+            bookName = book?.name.orEmpty(),
+            chapterTitle = page?.title.orEmpty(),
+            time = AppConst.timeFormat.format(Date()),
+            battery = battery,
+            page = (ReadBook.durPageIndex + 1).toString(),
+            totalPages = totalPages,
+            readProgress = page?.readProgress.orEmpty(),
+            chapter = (ReadBook.durChapterIndex + 1).toString(),
+            totalChapters = ReadBook.chapterSize.toString(),
+        )
+    }
 
     /** 页眉/页脚可见性（宿主 PageView.upTipStyle 同构：默认档页眉随「隐藏状态栏」接管/让位）。 */
     private fun tipVisibility() = ReaderHeaderFooterVisibility(
@@ -964,10 +1036,11 @@ private fun ReadBookConfig.snapshotStyle(): ReaderTextStyle = ReaderTextStyle(
     // 页眉/页脚字号：宿主单键两侧同读（getter 已按值域钳制）
     headerSize = ReadTipConfig.tipTextSize,
     footerSize = ReadTipConfig.tipTextSize,
-    // 分隔线恒 false：E-Ink 模式不渲染分隔线（模块 tip 绘制按 true 才画，
-    // 目录亦未声明——宿主 showHeaderLine/showFooterLine 与完整模式互不影响）
-    headerDivider = false,
-    footerDivider = false,
+    // 分隔线如实回读（0.8.2 起目录协商 + 模块恢复绘制）：模块 tip 绘制
+    // 按 true 画线、带高预留按同值计入厚度，与宿主 tipBandExtentPx 的
+    // 配置口径同源一致
+    headerDivider = showHeaderLine,
+    footerDivider = showFooterLine,
 )
 
 /**
@@ -993,8 +1066,10 @@ private fun applyBodyFont(selection: ReaderFontSelection) {
             AppConfig.systemTypefaces = 2
         }
 
-        // FollowBody 仅对标题/页眉合法，正文收到时不写
-        ReaderFontSelection.FollowBody -> Unit
+        // FollowBody 仅对标题/页眉合法（本宿主无标题/页眉字体协商行）；
+        // 正文收到属无意义输入，契约 0.8.0 起按 Sans 处理（模块 UI 不产生
+        // 该组合，此为防御口径）
+        ReaderFontSelection.FollowBody -> applyBodyFont(ReaderFontSelection.Sans)
     }
 }
 
@@ -1007,3 +1082,23 @@ private fun currentBodyFont(): ReaderFontSelection {
         else -> ReaderFontSelection.Sans
     }
 }
+
+/**
+ * 单槽模板 → 纯文本（完整模式 ReaderInfoTemplateRenderer 的文本化投影，
+ * 契约 ReaderTipSlotTexts 宿主义务）：逐 part 拼接，视觉型文本化降级——
+ * 电量图形给 `NN%`（时间+图形电量自然合成 `HH:mm NN%`）、章节标题给纯
+ * 标题（无箭头/书名装饰，模板内容即最终文本）。BatteryIcon 逐个降级而非
+ * 只取首个（经典模式同槽多图标同款全部渲染）。
+ *
+ * 「同型多槽只取首个」为 MD3 系完整模式工厂的 seen 去重语义（契约 KDoc
+ * 镜像其形态）；本宿主完整模式 PageView 六槽独立渲染无去重——按本宿主
+ * 完整模式同款保留重复（「完整模式同款槽位规则」以本宿主为准），用户
+ * 有意重复配置不被吞。
+ */
+internal fun renderTipSlotText(template: String, values: ReaderInfoValues): String =
+    ReaderInfoTemplate.parse(template, values).joinToString(separator = "") { part ->
+        when (part) {
+            is ReaderInfoPart.Text -> part.value
+            is ReaderInfoPart.BatteryIcon -> "${part.level}%"
+        }
+    }

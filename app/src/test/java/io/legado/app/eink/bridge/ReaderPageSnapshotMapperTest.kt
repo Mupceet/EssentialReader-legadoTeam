@@ -1,7 +1,14 @@
 package io.legado.app.eink.bridge
 
 import io.legado.app.help.HighlightStyle
+import io.legado.app.help.config.UNDERLINE_MODE_DASHED
+import io.legado.app.help.config.UNDERLINE_MODE_DOTTED
+import io.legado.app.help.config.UNDERLINE_MODE_DOUBLE
+import io.legado.app.help.config.UNDERLINE_MODE_DOUBLE_DASHED
+import io.legado.app.help.config.UNDERLINE_MODE_SOLID
+import io.legado.app.help.config.UNDERLINE_MODE_WAVY
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -174,5 +181,121 @@ class ReaderPageSnapshotMapperTest {
     @Test
     fun `全空签名不产生 run`() {
         assertTrue(mergeRuleRuns(listOf("文", "本"), listOf(null, null)).isEmpty())
+    }
+
+    // ---- 页级横线（整页文字下划线 → ruleLines）----
+
+    /** 发射输入基构型：实线 3px 粗、基线下 12px、显式黑。 */
+    private fun underlineSpec(
+        mode: Int,
+        widthPx: Float = 3f,
+        distancePx: Float = 12f,
+        titleEnabled: Boolean = true,
+        bodyEnabled: Boolean = true,
+        colorArgb: Int? = 0xFF111111.toInt(),
+    ) = WholePageUnderline(
+        mode = mode,
+        widthPx = widthPx,
+        distancePx = distancePx,
+        titleEnabled = titleEnabled,
+        bodyEnabled = bodyEnabled,
+        colorArgb = colorArgb,
+        bookIsImage = false,
+        dashOnPx = 18f,
+        dashOffPx = 12f,
+        doubleLineExtraPx = 3f,
+    )
+
+    /** 正文行基构型：缩进 20px、基线 40px。 */
+    private fun emitLine(
+        spec: WholePageUnderline,
+        isTitle: Boolean = false,
+        isImageLine: Boolean = false,
+        isHtmlLine: Boolean = false,
+        lineStartX: Float = 100f,
+        lineEndX: Float = 900f,
+        indentWidth: Float = 20f,
+        lineBaseY: Float = 40f,
+        grayArgb: Int = 0xFF000000.toInt(),
+    ) = wholePageUnderlineRuleLines(
+        isTitle = isTitle,
+        isImageLine = isImageLine,
+        isHtmlLine = isHtmlLine,
+        lineStartX = lineStartX,
+        lineEndX = lineEndX,
+        indentWidth = indentWidth,
+        lineBaseY = lineBaseY,
+        spec = spec,
+        grayArgb = grayArgb,
+    )
+
+    @Test
+    fun `实线下划线发射零高矩形并含缩进锚定基线加距离`() {
+        val lines = emitLine(underlineSpec(UNDERLINE_MODE_SOLID), grayArgb = 0xFF121212.toInt())
+        assertEquals(1, lines.size)
+        val line = lines[0]
+        assertEquals(120f, line.left, 0f) // lineStart + indentWidth
+        assertEquals(900f, line.right, 0f)
+        assertEquals(52f, line.top, 0f) // lineBase + distance
+        assertEquals("整页下划线为零高矩形（top == bottom = 线 y）", line.top, line.bottom, 0f)
+        assertEquals(3f, line.widthPx, 0f)
+        assertFalse(line.dashed)
+        assertEquals(0xFF121212.toInt(), line.colorArgb)
+    }
+
+    @Test
+    fun `虚线族按值发射_点状降级虚线_波浪降级实线`() {
+        // 虚线：dashed = true，墨长/空长原样透传
+        val dashed = emitLine(underlineSpec(UNDERLINE_MODE_DASHED))[0]
+        assertTrue(dashed.dashed)
+        assertEquals(18f, dashed.dashOnPx, 0f)
+        assertEquals(12f, dashed.dashOffPx, 0f)
+        // 点状：无契约形态，降级虚线（最接近的断线视觉）
+        assertTrue(emitLine(underlineSpec(UNDERLINE_MODE_DOTTED))[0].dashed)
+        // 波浪：花色形状无契约形态，降级实线（连续线语义）
+        assertFalse(emitLine(underlineSpec(UNDERLINE_MODE_WAVY))[0].dashed)
+    }
+
+    @Test
+    fun `双线系发射两条且分离为线粗加附加量`() {
+        // 双实线：y ∓ (3 + 3) / 2 = 52 ∓ 3
+        val doubleLines = emitLine(underlineSpec(UNDERLINE_MODE_DOUBLE))
+        assertEquals(2, doubleLines.size)
+        assertEquals(49f, doubleLines[0].top, 0f)
+        assertEquals(55f, doubleLines[1].top, 0f)
+        assertTrue(doubleLines.all { !it.dashed })
+        // 双虚线：两条均虚线
+        val doubleDashed = emitLine(underlineSpec(UNDERLINE_MODE_DOUBLE_DASHED))
+        assertEquals(2, doubleDashed.size)
+        assertTrue(doubleDashed.all { it.dashed })
+        assertEquals(49f, doubleDashed[0].top, 0f)
+    }
+
+    @Test
+    fun `标题正文分控与图片书_html_图片行门控不发射`() {
+        // 标题行在 body 关闭（仅 bodyEnabled=false）时仍发射（标题分控独立开）
+        assertEquals(
+            1,
+            emitLine(underlineSpec(UNDERLINE_MODE_SOLID, bodyEnabled = false), isTitle = true).size,
+        )
+        // 标题分控关闭：标题行不发射，正文行发射
+        assertTrue(emitLine(underlineSpec(UNDERLINE_MODE_SOLID, titleEnabled = false), isTitle = true).isEmpty())
+        assertEquals(1, emitLine(underlineSpec(UNDERLINE_MODE_SOLID, titleEnabled = false)).size)
+        // 引擎行级门控同款：图片书/图片行/HTML 行不发射
+        assertTrue(
+            emitLine(
+                underlineSpec(UNDERLINE_MODE_SOLID).copy(bookIsImage = true),
+            ).isEmpty()
+        )
+        assertTrue(emitLine(underlineSpec(UNDERLINE_MODE_SOLID), isImageLine = true).isEmpty())
+        assertTrue(emitLine(underlineSpec(UNDERLINE_MODE_SOLID), isHtmlLine = true).isEmpty())
+    }
+
+    @Test
+    fun `空列行与零宽行不发射`() {
+        // x1 <= x0（lineEnd 不大于缩进起点）跳过（引擎同款守卫）
+        assertTrue(
+            emitLine(underlineSpec(UNDERLINE_MODE_SOLID), lineStartX = 100f, lineEndX = 110f, indentWidth = 20f).isEmpty()
+        )
     }
 }

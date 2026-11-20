@@ -7,6 +7,7 @@ import io.legado.app.data.appDb
 import io.legado.app.data.entities.BookSource
 import io.legado.app.data.entities.SearchBook
 import io.legado.app.eink.contract.BookHandle
+import io.legado.app.eink.contract.ChangeSourceBook
 import io.legado.app.eink.contract.ChangeSourceBookUiModel
 import io.legado.app.eink.contract.ChangeSourceEngine
 import io.legado.app.eink.contract.ChangeSourceResultUiModel
@@ -54,11 +55,13 @@ internal object ChangeSourceEngineImpl : ChangeSourceEngine {
 
     override suspend fun currentReadingBook(
         bookUrl: String,
-    ): Pair<BookHandle, ChangeSourceBookUiModel>? {
+    ): ChangeSourceBook? {
         val book = ReadBook.book?.takeIf { it.bookUrl == bookUrl }
             ?: appDb.bookDao.getBook(bookUrl)
             ?: return null
-        return BookHandleImpl(book) to ChangeSourceBookUiModel(
+        return ChangeSourceBook(
+            handle = BookHandleImpl(book),
+            model = ChangeSourceBookUiModel(
             bookUrl = book.bookUrl,
             name = book.name,
             author = book.author,
@@ -67,8 +70,9 @@ internal object ChangeSourceEngineImpl : ChangeSourceEngine {
             //（originName 留空会使该行回落显示 origin URL）
             originName = book.originName,
             latestChapterTitle = book.latestChapterTitle,
-        )
+        ))
     }
+
 
     override fun enabledSources(): List<SourceHandle> =
         appDb.bookSourceDao.allEnabledPart
@@ -124,7 +128,7 @@ internal object ChangeSourceEngineImpl : ChangeSourceEngine {
                     author = searchBook.author,
                     origin = searchBook.origin,
                     originName = searchBook.originName,
-                    latestChapter = searchBook.latestChapterTitle,
+                    latestChapterTitle = searchBook.latestChapterTitle,
                     deduplicationKey = searchBook.primaryStr(),
                 )
             }
@@ -161,7 +165,7 @@ internal object ChangeSourceEngineImpl : ChangeSourceEngine {
                 author = searchBook.author,
                 origin = searchBook.origin,
                 originName = searchBook.originName,
-                latestChapter = searchBook.latestChapterTitle,
+                latestChapterTitle = searchBook.latestChapterTitle,
                 deduplicationKey = searchBook.primaryStr(),
             )
         }

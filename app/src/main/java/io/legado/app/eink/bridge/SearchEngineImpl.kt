@@ -120,7 +120,9 @@ internal object SearchEngineImpl : SearchEngine {
             }
 
             override fun onSearchFinish(isEmpty: Boolean, hasMore: Boolean) {
-                callback.onSearchFinish(isEmpty, hasMore)
+                // 0.8.0 起契约单轮全源语义：宿主 SearchModel 的 hasMore
+                // 无对应下一页请求机制，不转发
+                callback.onSearchFinish(isEmpty)
             }
 
             override fun onSearchCancel(exception: Throwable?) {

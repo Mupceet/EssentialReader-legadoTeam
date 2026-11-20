@@ -46,6 +46,18 @@ project(':modules:eink') {
             // 宿主侧代补 compileOnly——上游变体补齐后可移除
             compileOnly(files('libs/xposed-api-82.jar'))
         }
+        // eink-lib 34458250f 的 AGP<9 变体（build-agp8.gradle.kts）漏同步
+        // 单测 returnDefaultValues（AGP9 形态已有此配置：VM 级单测实例化
+        // Application stub / 触碰 Context API 需方法返回默认值而非抛异常，
+        // 新增页眉时钟/槽位流测试依赖）——宿主侧代补同款，上游变体补齐
+        // 后可移除
+        android {
+            testOptions {
+                unitTests {
+                    returnDefaultValues = true
+                }
+            }
+        }
     }
     tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
         compilerOptions {

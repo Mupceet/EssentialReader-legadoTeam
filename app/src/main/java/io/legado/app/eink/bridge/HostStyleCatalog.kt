@@ -21,10 +21,19 @@ import io.legado.app.eink.contract.ReaderStyleParamIds as Ids
  *    在快照期折算等效档，编辑写入即独立生效。
  *
  * affectsLayout 判定：本宿主 visibleHeight = viewHeight - 上下边距（含
- * E-Ink 装饰预留），页眉/页脚显隐与分割线不改变分页几何（绘制于边距
- * 带内），标 affectsLayout = false；字号（页眉/页脚带高随字号伸缩，
- * 见 ReaderEngineImpl.syncTipReserves）/字体/字重/标题参数与四边距均
- * 影响排版。
+ * E-Ink 装饰预留），带高随配置伸缩的参数（字号/分隔线——tipBandExtentPx
+ * 按配置计入分隔线厚度）与字体/字重/标题参数/四边距均影响排版；页脚
+ * 显隐的带高联动经宿主 syncTipExtents 重报视口闭环（目录标 false 保持
+ * 模块既有呈现，历史口径）。
+ *
+ * 刻意不声明（模块设置行隐藏，宿主能力面与契约参数模型不对应）：
+ *  - 整页文字下划线族（BODY_UNDERLINE 系）：宿主为 7 模式（实/虚/点/
+ *    双/波/双虚 + 线宽/间距/颜色/标题正文分控）自有配置界面，契约简化
+ *    模型（开关+虚线+墨长空长）无法无损投影，声明会与宿主配置互踩；
+ *    渲染经页快照 ruleLines 如实发射（ReaderPageSnapshotMapper），配置
+ *    面仍走宿主完整模式同款对话框，两模式共享同一存储；
+ *  - 正文斜体/标题分段族/页脚字体：宿主引擎无对应配置键（无参可协商，
+ *    契约 0.8.1 总账的排除项清单同口径）。
  */
 internal object HostStyleCatalog {
 
@@ -67,7 +76,7 @@ internal object HostStyleCatalog {
             stepped(Ids.TITLE_TOP_SPACING, 0f, 48f, 0f),
             stepped(Ids.TITLE_BOTTOM_SPACING, 0f, 48f, 0f),
             ReaderStyleParam.Choice(
-                id = Ids.HEADER_VISIBILITY,
+                id = Ids.HEADER_MODE,
                 available = true,
                 affectsLayout = true,
                 options = listOf(
@@ -88,10 +97,21 @@ internal object HostStyleCatalog {
             // 拖动条写两侧）；带高随字号伸缩（syncTipExtents）影响分页
             stepped(Ids.HEADER_SIZE, 5f, 50f, 12f),
             stepped(Ids.FOOTER_SIZE, 5f, 50f, 12f),
-            // 页眉/页脚分隔线不声明（模块 UI 整行隐藏）：E-Ink 模式不渲染
-            // 分隔线（模块 tip 绘制按 style.headerDivider/footerDivider ==
-            // true 才画，snapshotStyle 恒发 false），宿主 showHeaderLine/
-            // showFooterLine 键保留给完整模式，两模式互不干扰
+            // 页眉/页脚分隔线（0.8.2 起模块恢复绘制）：写宿主 showHeaderLine/
+            // showFooterLine，快照样式如实回读，模块 tip 绘制与带高预留按
+            // 同值画线/计入厚度——两模式共享同一配置键
+            ReaderStyleParam.Toggle(
+                id = Ids.HEADER_DIVIDER,
+                available = true,
+                affectsLayout = true,
+                default = false,
+            ),
+            ReaderStyleParam.Toggle(
+                id = Ids.FOOTER_DIVIDER,
+                available = true,
+                affectsLayout = true,
+                default = true,
+            ),
             stepped(Ids.BODY_PADDING_TOP, 0f, 48f, 6f),
             stepped(Ids.BODY_PADDING_BOTTOM, 0f, 48f, 6f),
             stepped(Ids.BODY_PADDING_LEFT, 0f, 64f, 16f),

@@ -30,7 +30,7 @@ internal object TocEngineImpl : TocEngine {
     )
 
     private fun BookChapter.toUiModel() = ChapterUiModel(
-        index = index,
+        chapterIndex = index,
         title = title,
         url = url,
         isVolume = isVolume,

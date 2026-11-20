@@ -11,9 +11,17 @@ import io.legado.app.eink.contract.ReaderImageSlot
 import io.legado.app.eink.contract.ReaderPageLine
 import io.legado.app.eink.contract.ReaderPageSnapshot
 import io.legado.app.eink.contract.ReaderPaintSpec
+import io.legado.app.eink.contract.ReaderRuleLine
 import io.legado.app.eink.contract.ReaderUnderlineGeometry
 import io.legado.app.help.HighlightMatcher
 import io.legado.app.help.HighlightStyle
+import io.legado.app.help.book.isImage
+import io.legado.app.help.config.ReadBookConfig
+import io.legado.app.help.config.UNDERLINE_MODE_DASHED
+import io.legado.app.help.config.UNDERLINE_MODE_DOTTED
+import io.legado.app.help.config.UNDERLINE_MODE_DOUBLE
+import io.legado.app.help.config.UNDERLINE_MODE_DOUBLE_DASHED
+import io.legado.app.help.config.UNDERLINE_MODE_OFF
 import io.legado.app.model.ImageProvider
 import io.legado.app.model.ReadBook
 import io.legado.app.model.isForBook
@@ -42,6 +50,13 @@ import kotlin.math.roundToInt
  * （skew，不改步进宽、无对齐风险）经逐段覆盖跨桥。本宿主 minSdk 21：
  * 可变字重 getter 为 API 26，映射期按 SDK 门控（21~25 无可变字重排版，
  * 恒 null 安全）。
+ *
+ * 页级横线（0.8.2 起契约 ruleLines 通道）：整页文字下划线（宿主
+ * 「文字下划线」全局配置，引擎绘制期逐行画线——此处按同输入推导发射，
+ * 引擎 TextLine 条件/几何调整时两处须同步）。章节分隔线无线源：本宿主
+ * 引擎不产 `<hr>` 独立行元素（TextViewTagHandler 的 HorizontalRuleSpan
+ * 属 legacy TextView 通路，不进分页引擎）。基线斜体（textSkewX）不发射：
+ * 宿主无正文斜体配置键。
  *
  * 高亮规则渲染（完整模式 ContentTextView.upHighlight 的 E-Ink 等价物）：
  *  - 规则命中样式经 [HighlightMatcher.resolve] 解析到列（完整模式同款
@@ -95,6 +110,29 @@ internal object ReaderPageSnapshotMapper {
                 }
                 .toList(),
             ruleStyles = resolveRuleStyles(page),
+            wholePageUnderline = currentWholePageUnderline(),
+        )
+    }
+
+    /**
+     * 整页文字下划线的映射期快照（引擎 TextLine.activeUnderlineMode +
+     * drawUnderline 的全局配置输入投影；null = 关闭/线宽 0 不发射）。
+     * px 换算在此一次完成，纯函数核心只做几何推导。
+     */
+    private fun currentWholePageUnderline(): WholePageUnderline? {
+        val mode = ReadBookConfig.underlineMode
+        if (mode == UNDERLINE_MODE_OFF || ReadBookConfig.underlineWidth <= 0f) return null
+        return WholePageUnderline(
+            mode = mode,
+            widthPx = ReadBookConfig.underlineWidth.dpToPx(),
+            distancePx = ReadBookConfig.underlineDistance.dpToPx(),
+            titleEnabled = ReadBookConfig.underlineTitleEnabled,
+            bodyEnabled = ReadBookConfig.underlineBodyEnabled,
+            colorArgb = ReadBookConfig.underlineColor.takeIf { ReadBookConfig.underlineColorSet },
+            bookIsImage = ReadBook.book?.isImage == true,
+            dashOnPx = 6f.dpToPx(),
+            dashOffPx = 4f.dpToPx(),
+            doubleLineExtraPx = 1f.dpToPx(),
         )
     }
 
@@ -261,10 +299,14 @@ internal object ReaderPageSnapshotMapper {
         markings: List<ReaderMarkingAnchor> = emptyList(),
         /** 页级规则样式（行 × 列矩阵，与 page.lines/line.columns 平行；null = 无）。 */
         ruleStyles: List<List<HighlightStyle?>>? = null,
+        /** 整页文字下划线（null = 关闭，不发射横线）。 */
+        wholePageUnderline: WholePageUnderline? = null,
         offsetX: Float = 0f,
         offsetY: Float = 0f,
     ): ReaderPageSnapshot {
         val images = ArrayList<ReaderImageSlot>()
+        // 页级横线（整页文字下划线；本宿主引擎无 <hr> 独立行元素，无分隔线线源）
+        val ruleLines = ArrayList<ReaderRuleLine>()
         // 行段（章内位置 → 行文本）与待组装行：循环后锚点校验再产装饰
         val segmentStarts = ArrayList<Int>()
         val segmentTexts = ArrayList<String>()
@@ -330,6 +372,21 @@ internal object ReaderPageSnapshotMapper {
                         position += 1
                     }
                 }
+            }
+            // 整页文字下划线 → 页级横线发射（引擎 TextLine.drawUnderline 同
+            // 输入投影，几何推导在纯函数 wholePageUnderlineRuleLines）
+            wholePageUnderline?.let { spec ->
+                ruleLines += wholePageUnderlineRuleLines(
+                    isTitle = line.isTitle,
+                    isImageLine = line.isImage,
+                    isHtmlLine = line.isHtml,
+                    lineStartX = line.lineStart + offsetX,
+                    lineEndX = line.lineEnd + offsetX,
+                    indentWidth = line.indentWidth,
+                    lineBaseY = line.lineBase + offsetY,
+                    spec = spec,
+                    grayArgb = (spec.colorArgb ?: line.textColor).toEInkGrayArgb(),
+                )
             }
             if (chunks.isNotEmpty()) {
                 segmentStarts.add(line.chapterPosition)
@@ -404,6 +461,7 @@ internal object ReaderPageSnapshotMapper {
             contentSpec = contentSpec,
             lines = lines,
             images = images,
+            ruleLines = ruleLines,
             bookmarkBadge = bookmarkBadge,
         )
     }
@@ -458,6 +516,70 @@ internal fun Int.toEInkGrayArgb(): Int {
 }
 
 /**
+ * 整页下划线单行发射（纯函数，引擎 TextLine 行门控 + drawUnderline 同
+ * 几何投影）：行级门控（标题/正文分控、图片/HTML 行、图片书）不过则空表；
+ * y 口径 = 引擎线 y（lineBase + distance），ruleLines 以 top == bottom = 线 y
+ * 的零高矩形表达。线形映射：实/虚按值；点状降级虚线（最接近的断线视觉，
+ * 同规则线 DOTTED 降级先例）；波浪降级实线（连续线语义，花色形状无契约
+ * 形态，同 SVG 花色线降级实线先例）；双线系发射两条（实/虚随模式），
+ * 分离 = 线粗 + 1dp 同引擎 separation。x1 <= x0（空列行）不发射（引擎
+ * 同款守卫）。
+ */
+internal fun wholePageUnderlineRuleLines(
+    isTitle: Boolean,
+    isImageLine: Boolean,
+    isHtmlLine: Boolean,
+    lineStartX: Float,
+    lineEndX: Float,
+    indentWidth: Float,
+    lineBaseY: Float,
+    spec: WholePageUnderline,
+    grayArgb: Int,
+): List<ReaderRuleLine> {
+    val enabled = if (isTitle) spec.titleEnabled else spec.bodyEnabled
+    if (!enabled || spec.bookIsImage || isImageLine || isHtmlLine) return emptyList()
+    val x0 = lineStartX + indentWidth
+    val x1 = lineEndX
+    if (x1 <= x0) return emptyList()
+    val y = lineBaseY + spec.distancePx
+    val dashed = spec.mode == UNDERLINE_MODE_DASHED ||
+        spec.mode == UNDERLINE_MODE_DOTTED ||
+        spec.mode == UNDERLINE_MODE_DOUBLE_DASHED
+    val separation = spec.widthPx + spec.doubleLineExtraPx
+    return if (spec.mode == UNDERLINE_MODE_DOUBLE || spec.mode == UNDERLINE_MODE_DOUBLE_DASHED) {
+        listOf(
+            underlineRuleLine(x0, y - separation / 2f, x1, spec, grayArgb, dashed),
+            underlineRuleLine(x0, y + separation / 2f, x1, spec, grayArgb, dashed),
+        )
+    } else {
+        listOf(underlineRuleLine(x0, y, x1, spec, grayArgb, dashed))
+    }
+}
+
+/**
+ * 整页下划线单线 → ruleLines 条目（零高矩形，top == bottom = 线 y；契约
+ * 口径：整页下划线 bounds 无高，模块取 y 直接画线）。
+ */
+private fun underlineRuleLine(
+    x0: Float,
+    y: Float,
+    x1: Float,
+    spec: WholePageUnderline,
+    grayArgb: Int,
+    dashed: Boolean,
+) = ReaderRuleLine(
+    left = x0,
+    top = y,
+    right = x1,
+    bottom = y,
+    colorArgb = grayArgb,
+    widthPx = spec.widthPx,
+    dashed = dashed,
+    dashOnPx = spec.dashOnPx,
+    dashOffPx = spec.dashOffPx,
+)
+
+/**
  * 合成斜体倾斜量：镜像 `HighlightDraw.obtainTextPaint` 的
  * `textSkewX = -0.25f`（完整模式口径——规则斜体一律 skew 合成，不换
  * 字体 italic 面）。刻意不改引擎文件抽公共常量：bridge 只读引擎行为，
@@ -465,16 +587,43 @@ internal fun Int.toEInkGrayArgb(): Int {
  */
 internal const val SYNTHETIC_ITALIC_SKEW_X = -0.25f
 
-/** 行内一段规则装饰的绘制签名（相邻同签名段合并为同一 run）。 */
-internal data class RuleRunSignature(
-    /** 契约 underlineMode：0 无 / 1..4 线形 / 6 删除线 / 7 荧光半高带。 */
-    val underlineMode: Int,
-    /** true = 整行盒高亮带（highlightColorArgb 涂色）。 */
-    val highlight: Boolean,
-    val highlightColorArgb: Int?,
-    val underlineColorArgb: Int?,
-    val underline: ReaderUnderlineGeometry?,
-)
+    /** 行内一段规则装饰的绘制签名（相邻同签名段合并为同一 run）。 */
+    internal data class RuleRunSignature(
+        /** 契约 underlineMode：0 无 / 1..4 线形 / 6 删除线 / 7 荧光半高带。 */
+        val underlineMode: Int,
+        /** true = 整行盒高亮带（highlightColorArgb 涂色）。 */
+        val highlight: Boolean,
+        val highlightColorArgb: Int?,
+        val underlineColorArgb: Int?,
+        val underline: ReaderUnderlineGeometry?,
+    )
+
+    /**
+     * 整页文字下划线的发射输入（[io.legado.app.help.config.ReadBookConfig]
+     * 全局配置的映射期快照，px 已换算）。几何与引擎 TextLine.drawUnderline
+     * 同源——引擎条件/几何调整时两处须同步（bridge 只读引擎行为，不动
+     * 绘制层）。
+     */
+    internal data class WholePageUnderline(
+        /** 引擎 underlineMode（1 实/2 虚/3 点/4 双/5 波/6 双虚）。 */
+        val mode: Int,
+        /** 线粗（px，引擎 strokeWidth 同式 underlineWidth.dpToPx()）。 */
+        val widthPx: Float,
+        /** 基线到线的距离（px，引擎 lineY = lineBase + distance 同式）。 */
+        val distancePx: Float,
+        val titleEnabled: Boolean,
+        val bodyEnabled: Boolean,
+        /** 显式下划线色（ARGB，underlineColorSet 时非 null）；null = 跟随行文字色。 */
+        val colorArgb: Int?,
+        /** 引擎全局门控：图片书不发射（activeUnderlineMode 同款）。 */
+        val bookIsImage: Boolean,
+        /** 虚线墨长（px，引擎 underlineDashPathEffect 同值 6dp）。 */
+        val dashOnPx: Float,
+        /** 虚线空长（px，引擎同值 4dp）。 */
+        val dashOffPx: Float,
+        /** 双线分离附加量（px，引擎 separation = width + 1dp 的 1dp 项）。 */
+        val doubleLineExtraPx: Float,
+    )
 
 /**
  * 高亮带签名：矩形/圆角/胶囊底折整行盒带（highlight）；荧光/半高/基线

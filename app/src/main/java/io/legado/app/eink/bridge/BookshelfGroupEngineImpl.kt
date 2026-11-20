@@ -324,7 +324,7 @@ internal object BookshelfGroupEngineImpl : BookshelfGroupEngine {
                     .take(GROUP_COVER_COUNT)
                     .map { book ->
                         BookshelfCoverRefUiModel(
-                            url = book.getDisplayCover(),
+                            coverUrl = book.getDisplayCover(),
                             name = book.name,
                             author = book.author,
                             origin = book.origin,

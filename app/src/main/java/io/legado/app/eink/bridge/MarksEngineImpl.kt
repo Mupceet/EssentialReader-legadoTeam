@@ -7,7 +7,9 @@ import io.legado.app.data.entities.Bookmark
 import io.legado.app.eink.contract.BookmarkUiModel
 import io.legado.app.eink.contract.JumpResolution
 import io.legado.app.eink.contract.MarksEngine
+import io.legado.app.eink.contract.MarkingNoteUpdate
 import io.legado.app.eink.contract.MarkingUiModel
+import io.legado.app.eink.contract.PageBookmarkToggle
 import io.legado.app.eink.contract.ReaderMarkingDetail
 import io.legado.app.eink.contract.ReaderPageBookmarkContent
 import io.legado.app.eink.contract.ReaderSelectionCommit
@@ -90,17 +92,17 @@ internal object MarksEngineImpl : MarksEngine {
         }
     }
 
-    override suspend fun updateMarkingNote(markingId: String, note: String): Boolean? {
-        val marking = findBookmarkRow(markingId) ?: return null
+    override suspend fun updateMarkingNote(markingId: String, note: String): MarkingNoteUpdate {
+        val marking = findBookmarkRow(markingId) ?: return MarkingNoteUpdate.NotFound
         return try {
             marking.content = note
             appDb.bookmarkDao.update(marking)
             ReaderEngineImpl.relayout()
-            true
+            MarkingNoteUpdate.Success
         } catch (e: CancellationException) {
             throw e
-        } catch (_: Exception) {
-            false
+        } catch (e: Exception) {
+            MarkingNoteUpdate.Failure(e)
         }
     }
 
@@ -126,9 +128,10 @@ internal object MarksEngineImpl : MarksEngine {
         )
     }
 
-    override suspend fun togglePageBookmark(content: ReaderPageBookmarkContent): Boolean? {
-        val book = ReadBook.book ?: return null
-        val page = ReadBook.curTextChapter?.getPage(ReadBook.durPageIndex) ?: return null
+    override suspend fun togglePageBookmark(content: ReaderPageBookmarkContent): PageBookmarkToggle {
+        val book = ReadBook.book ?: return PageBookmarkToggle.Unavailable
+        val page = ReadBook.curTextChapter?.getPage(ReadBook.durPageIndex)
+            ?: return PageBookmarkToggle.Unavailable
         val samePage = appDb.bookmarkDao.getByBook(book.name, book.author)
             .filter {
                 it.isPageBookmark() &&
@@ -140,7 +143,7 @@ internal object MarksEngineImpl : MarksEngine {
                 // 同页多条时删最近一条（契约快速书签语义）
                 appDb.bookmarkDao.delete(samePage.maxBy { it.time })
                 ReaderEngineImpl.relayout()
-                false
+                PageBookmarkToggle.Removed
             } else {
                 appDb.bookmarkDao.insert(
                     book.createBookMark().apply {
@@ -154,12 +157,12 @@ internal object MarksEngineImpl : MarksEngine {
                     }
                 )
                 ReaderEngineImpl.relayout()
-                true
+                PageBookmarkToggle.Added
             }
         } catch (e: CancellationException) {
             throw e
-        } catch (_: Exception) {
-            null
+        } catch (e: Exception) {
+            PageBookmarkToggle.Unavailable
         }
     }
 
