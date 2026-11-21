@@ -26,6 +26,7 @@ import io.legado.app.model.ImageProvider
 import io.legado.app.model.ReadBook
 import io.legado.app.model.isForBook
 import io.legado.app.ui.book.read.page.entities.TextPage
+import io.legado.app.ui.book.read.page.entities.underlineYieldSegments
 import io.legado.app.ui.book.read.page.entities.column.ImageColumn
 import io.legado.app.ui.book.read.page.entities.column.TextBaseColumn
 import io.legado.app.ui.book.read.page.entities.column.TextColumn
@@ -53,10 +54,12 @@ import kotlin.math.roundToInt
  *
  * 页级横线（0.8.2 起契约 ruleLines 通道）：整页文字下划线（宿主
  * 「文字下划线」全局配置，引擎绘制期逐行画线——此处按同输入推导发射，
- * 引擎 TextLine 条件/几何调整时两处须同步）。章节分隔线无线源：本宿主
- * 引擎不产 `<hr>` 独立行元素（TextViewTagHandler 的 HorizontalRuleSpan
- * 属 legacy TextView 通路，不进分页引擎）。基线斜体（textSkewX）不发射：
- * 宿主无正文斜体配置键。
+ * 引擎 TextLine 条件/几何调整时两处须同步；让位口径同源——行内规则/
+ * 笔记下划线覆盖段挖空，经典模式与墨水屏两渲染面共用
+ * [underlineYieldSegments] 分段器，同位置不再双线并行）。章节分隔线无线
+ * 源：本宿主引擎不产 `<hr>` 独立行元素（TextViewTagHandler 的
+ * HorizontalRuleSpan 属 legacy TextView 通路，不进分页引擎）。基线斜体
+ * （textSkewX）不发射：宿主无正文斜体配置键。
  *
  * 高亮规则渲染（完整模式 ContentTextView.upHighlight 的 E-Ink 等价物）：
  *  - 规则命中样式经 [HighlightMatcher.resolve] 解析到列（完整模式同款
@@ -279,6 +282,11 @@ internal object ReaderPageSnapshotMapper {
         val lineSignatures: List<RuleRunSignature?>,
         // 与 chunks 平行的逐段画笔覆盖（null = 沿用行规格；页内按签名共享实例）
         val chunkOverrides: List<ReaderChunkPaintOverride?>,
+        // 与 chunks 平行的「规则线形下划线覆盖」标志（mode 1..4；荧光带/
+        // 删除线不构成让位覆盖）
+        val chunkUnderlineCovered: BooleanArray,
+        // 整页下划线发射锚（行几何 + 窗口偏移；spec 关闭时 null 不发射）
+        val underlineAnchor: UnderlineLineAnchor?,
     )
 
     /**
@@ -325,6 +333,7 @@ internal object ReaderPageSnapshotMapper {
             val baselineDropPx = line.lineBottom - line.lineBase
             val bandSignatures = ArrayList<RuleRunSignature?>()
             val lineSignatures = ArrayList<RuleRunSignature?>()
+            val underlineCovered = ArrayList<Boolean>()
             val chunkOverrideCandidates = ArrayList<ReaderChunkPaintOverride?>()
             // 各文本段首字符的章内位置：行 chapterPosition 起步，按行内元素
             // 字符占位累计（文本段按段长；图片/评论等替换字符各占 1 位）
@@ -339,9 +348,12 @@ internal object ReaderPageSnapshotMapper {
                         position += column.charData.length
                         val ruleStyle = ruleStyles?.getOrNull(lineIndex)?.getOrNull(columnIndex)
                         bandSignatures.add(ruleStyle?.bandRunSignature())
-                        lineSignatures.add(
+                        val lineSignature =
                             ruleStyle?.lineRunSignature(dpPx = { it.dpToPx() }, baselineDropPx)
-                        )
+                        lineSignatures.add(lineSignature)
+                        // 线形下划线（mode 1..4）构成整页线的让位覆盖；荧光带/
+                        // 删除线不构成（无可视下划线，同引擎口径）
+                        underlineCovered.add(lineSignature?.underline != null)
                         chunkOverrideCandidates.add(
                             ruleStyle.chunkOverrideOrNull(spec, overrideInterned)
                         )
@@ -373,21 +385,6 @@ internal object ReaderPageSnapshotMapper {
                     }
                 }
             }
-            // 整页文字下划线 → 页级横线发射（引擎 TextLine.drawUnderline 同
-            // 输入投影，几何推导在纯函数 wholePageUnderlineRuleLines）
-            wholePageUnderline?.let { spec ->
-                ruleLines += wholePageUnderlineRuleLines(
-                    isTitle = line.isTitle,
-                    isImageLine = line.isImage,
-                    isHtmlLine = line.isHtml,
-                    lineStartX = line.lineStart + offsetX,
-                    lineEndX = line.lineEnd + offsetX,
-                    indentWidth = line.indentWidth,
-                    lineBaseY = line.lineBase + offsetY,
-                    spec = spec,
-                    grayArgb = (spec.colorArgb ?: line.textColor).toEInkGrayArgb(),
-                )
-            }
             if (chunks.isNotEmpty()) {
                 segmentStarts.add(line.chapterPosition)
                 segmentTexts.add(chunks.joinToString(""))
@@ -405,6 +402,16 @@ internal object ReaderPageSnapshotMapper {
                         bandSignatures = bandSignatures,
                         lineSignatures = lineSignatures,
                         chunkOverrides = chunkOverrideCandidates,
+                        chunkUnderlineCovered = underlineCovered.toBooleanArray(),
+                        underlineAnchor = wholePageUnderline?.let {
+                            UnderlineLineAnchor(
+                                lineStartX = line.lineStart + offsetX,
+                                lineEndX = line.lineEnd + offsetX,
+                                indentWidth = line.indentWidth,
+                                lineBaseY = line.lineBase + offsetY,
+                                textColorArgb = line.textColor,
+                            )
+                        },
                     )
                 )
             }
@@ -413,6 +420,28 @@ internal object ReaderPageSnapshotMapper {
         // 长度近似；含图片/替换字符的行两套索引有少量漂移，钳制后最多
         // 划短不划错行），实线 = 划线 / 虚线 = 想法
         val validated = validatedMarkings(markings, segmentStarts, segmentTexts)
+        // 整页文字下划线 → 页级横线（锚点校验后发射，让位行内下划线）：
+        // 覆盖 = 规则线形下划线的列真值区间（循环期标志）+ 笔记划线锚点
+        // 命中的块区间（块边界粒度）——与经典模式 TextLine.drawUnderline
+        // 的列覆盖口径同源（同一 highlightStyle.underline 语义），同位置
+        // 不再双线并行；无覆盖时单段与旧行为逐像素一致
+        wholePageUnderline?.let { spec ->
+            for (pending in pendingLines) {
+                val anchor = pending.underlineAnchor ?: continue
+                ruleLines += wholePageUnderlineRuleLines(
+                    isTitle = pending.isTitle,
+                    isImageLine = false,
+                    isHtmlLine = false,
+                    lineStartX = anchor.lineStartX,
+                    lineEndX = anchor.lineEndX,
+                    indentWidth = anchor.indentWidth,
+                    lineBaseY = anchor.lineBaseY,
+                    spec = spec,
+                    grayArgb = (spec.colorArgb ?: anchor.textColorArgb).toEInkGrayArgb(),
+                    coveredRanges = pendingUnderlineCoveredRanges(pending, validated),
+                )
+            }
+        }
         val lines = pendingLines.map { pending ->
             // 书签 run 在前：模块点按命中取首个覆盖 run，可操作的用户标记
             //（划线/想法）优先于纯视觉的规则装饰
@@ -464,6 +493,42 @@ internal object ReaderPageSnapshotMapper {
             ruleLines = ruleLines,
             bookmarkBadge = bookmarkBadge,
         )
+    }
+
+    /**
+     * 单行整页下划线的让位覆盖区间（px，窗口坐标）：规则线形下划线的块
+     * 区间（循环期标志，列真值界）+ 笔记划线锚点命中的块区间（块边界
+     * 粒度，[anchorCoveredRange] 纯函数逐锚点产出）。
+     */
+    private fun pendingUnderlineCoveredRanges(
+        pending: PendingLine,
+        anchors: List<ReaderMarkingAnchor>,
+    ): List<ClosedFloatingPointRange<Float>> {
+        val anchor = pending.underlineAnchor ?: return emptyList()
+        val ranges = ArrayList<ClosedFloatingPointRange<Float>>(2)
+        val lastIndex = pending.chunks.lastIndex
+        for (index in pending.chunks.indices) {
+            if (!pending.chunkUnderlineCovered[index]) continue
+            val endX = if (index < lastIndex) pending.x[index + 1] else anchor.lineEndX
+            ranges.add(pending.x[index]..endX)
+        }
+        if (anchors.isNotEmpty()) {
+            val chunkLengths = pending.chunks.map { it.length }
+            for (marking in anchors) {
+                val start = (marking.start - pending.startPos).coerceAtLeast(0)
+                val end = (marking.start + marking.text.length - pending.startPos)
+                    .coerceAtMost(pending.textLen)
+                if (end <= start) continue
+                anchorCoveredRange(
+                    anchorStartLocal = start,
+                    anchorEndLocal = end,
+                    chunkLengths = chunkLengths,
+                    chunkStartX = pending.x,
+                    lastChunkEndX = anchor.lineEndX,
+                )?.let(ranges::add)
+            }
+        }
+        return ranges
     }
 
     /**
@@ -519,11 +584,14 @@ internal fun Int.toEInkGrayArgb(): Int {
  * 整页下划线单行发射（纯函数，引擎 TextLine 行门控 + drawUnderline 同
  * 几何投影）：行级门控（标题/正文分控、图片/HTML 行、图片书）不过则空表；
  * y 口径 = 引擎线 y（lineBase + distance），ruleLines 以 top == bottom = 线 y
- * 的零高矩形表达。线形映射：实/虚按值；点状降级虚线（最接近的断线视觉，
- * 同规则线 DOTTED 降级先例）；波浪降级实线（连续线语义，花色形状无契约
- * 形态，同 SVG 花色线降级实线先例）；双线系发射两条（实/虚随模式），
- * 分离 = 线粗 + 1dp 同引擎 separation。x1 <= x0（空列行）不发射（引擎
- * 同款守卫）。
+ * 的零高矩形表达；[coveredRanges] 为行内更高优先级下划线（规则线形 +
+ * 笔记划线）的覆盖区间，经 [underlineYieldSegments] 让位分段（MD3 宿主
+ * addPageUnderline 同款——覆盖段挖空、余下断开成段、整行被覆盖不发线，
+ * 与经典模式 TextLine.drawUnderline 共用同一分段器）。线形映射：实/虚按
+ * 值；点状降级虚线（最接近的断线视觉，同规则线 DOTTED 降级先例）；波浪
+ * 降级实线（连续线语义，花色形状无契约形态，同 SVG 花色线降级实线先例）；
+ * 双线系每段发射两条（实/虚随模式），分离 = 线粗 + 1dp 同引擎 separation。
+ * x1 <= x0（空列行）不发射（引擎同款守卫）。
  */
 internal fun wholePageUnderlineRuleLines(
     isTitle: Boolean,
@@ -535,25 +603,71 @@ internal fun wholePageUnderlineRuleLines(
     lineBaseY: Float,
     spec: WholePageUnderline,
     grayArgb: Int,
+    coveredRanges: List<ClosedFloatingPointRange<Float>> = emptyList(),
 ): List<ReaderRuleLine> {
     val enabled = if (isTitle) spec.titleEnabled else spec.bodyEnabled
     if (!enabled || spec.bookIsImage || isImageLine || isHtmlLine) return emptyList()
     val x0 = lineStartX + indentWidth
     val x1 = lineEndX
     if (x1 <= x0) return emptyList()
+    val segments = underlineYieldSegments(x0, x1, coveredRanges)
+    if (segments.isEmpty()) return emptyList()
     val y = lineBaseY + spec.distancePx
     val dashed = spec.mode == UNDERLINE_MODE_DASHED ||
         spec.mode == UNDERLINE_MODE_DOTTED ||
         spec.mode == UNDERLINE_MODE_DOUBLE_DASHED
-    val separation = spec.widthPx + spec.doubleLineExtraPx
-    return if (spec.mode == UNDERLINE_MODE_DOUBLE || spec.mode == UNDERLINE_MODE_DOUBLE_DASHED) {
-        listOf(
-            underlineRuleLine(x0, y - separation / 2f, x1, spec, grayArgb, dashed),
-            underlineRuleLine(x0, y + separation / 2f, x1, spec, grayArgb, dashed),
-        )
-    } else {
-        listOf(underlineRuleLine(x0, y, x1, spec, grayArgb, dashed))
+    val double = spec.mode == UNDERLINE_MODE_DOUBLE ||
+        spec.mode == UNDERLINE_MODE_DOUBLE_DASHED
+    val lines = ArrayList<ReaderRuleLine>(if (double) segments.size * 2 else segments.size)
+    for (segment in segments) {
+        val segmentStart = segment.start
+        val segmentEnd = segment.endInclusive
+        if (double) {
+            lines.add(
+                underlineRuleLine(segmentStart, y - separationOf(spec) / 2f, segmentEnd, spec, grayArgb, dashed)
+            )
+            lines.add(
+                underlineRuleLine(segmentStart, y + separationOf(spec) / 2f, segmentEnd, spec, grayArgb, dashed)
+            )
+        } else {
+            lines.add(underlineRuleLine(segmentStart, y, segmentEnd, spec, grayArgb, dashed))
+        }
     }
+    return lines
+}
+
+/** 双线分离（引擎 separation = 线粗 + 1dp 同式）。 */
+private fun separationOf(spec: WholePageUnderline): Float =
+    spec.widthPx + spec.doubleLineExtraPx
+
+/**
+ * 笔记划线锚点命中块的 px 区间（纯函数，块边界粒度）：块按章内位置连续
+ * 铺满行文本，锚点行内区间 [anchorStartLocal, anchorEndLocal) 与块的交
+ * 非空即覆盖——命中块连续，区间取首块左缘到末块右缘；无命中返回 null。
+ * 块边界粒度即装饰 run 的发射粒度，让位缺口与笔记下划线边缘自然衔接。
+ */
+internal fun anchorCoveredRange(
+    anchorStartLocal: Int,
+    anchorEndLocal: Int,
+    chunkLengths: List<Int>,
+    chunkStartX: FloatArray,
+    lastChunkEndX: Float,
+): ClosedFloatingPointRange<Float>? {
+    if (anchorEndLocal <= anchorStartLocal) return null
+    var first = -1
+    var last = -1
+    var offset = 0
+    for (index in chunkLengths.indices) {
+        val chunkEnd = offset + chunkLengths[index]
+        if (chunkEnd > anchorStartLocal && offset < anchorEndLocal) {
+            if (first < 0) first = index
+            last = index
+        }
+        offset = chunkEnd
+    }
+    if (first < 0) return null
+    val endX = if (last < chunkLengths.lastIndex) chunkStartX[last + 1] else lastChunkEndX
+    return chunkStartX[first]..endX
 }
 
 /**
@@ -596,6 +710,19 @@ internal const val SYNTHETIC_ITALIC_SKEW_X = -0.25f
         val highlightColorArgb: Int?,
         val underlineColorArgb: Int?,
         val underline: ReaderUnderlineGeometry?,
+    )
+
+    /**
+     * 单行整页下划线发射输入（px，窗口坐标）：行几何原值 + 窗口偏移，
+     * 发射挪到锚点校验后（笔记让位覆盖需校验锚点），行循环期只收集。
+     */
+    internal class UnderlineLineAnchor(
+        val lineStartX: Float,
+        val lineEndX: Float,
+        val indentWidth: Float,
+        val lineBaseY: Float,
+        /** 行文字色（整页下划线无显式色时随行色灰度跨桥，引擎 drawUnderline 同口径）。 */
+        val textColorArgb: Int,
     )
 
     /**

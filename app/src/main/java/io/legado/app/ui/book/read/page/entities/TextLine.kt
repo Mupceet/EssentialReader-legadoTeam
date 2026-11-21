@@ -55,6 +55,44 @@ internal fun underlineRenderBottom(
 }
 
 /**
+ * 正文整页下划线让位分段（纯函数，经典模式与 E-Ink ruleLines 发射共用）：
+ * 把 [x0, x1] 按行内更高优先级下划线的覆盖区间挖空——覆盖段不画、余下
+ * 断开成段、整行被覆盖返回空表；无覆盖时返回单段 [x0, x1] 与旧行为逐
+ * 像素一致。行内下划线（高亮规则 + 笔记划线）同经列 highlightStyle.underline
+ * 表达且赢者全取，同位置再叠正文线即两条线并行（MD3 宿主 ReaderPaginator
+ * addPageUnderline 同款修复）。零宽/退化覆盖区间经裁剪自然剔除——无可视
+ * 线不压正文线，同「纯荧光带不压」口径；覆盖区间无需有序、重叠自动合并
+ * （cursor 单调推进）。
+ */
+internal fun underlineYieldSegments(
+    x0: Float,
+    x1: Float,
+    covered: List<ClosedFloatingPointRange<Float>>,
+): List<ClosedFloatingPointRange<Float>> {
+    if (x1 <= x0) return emptyList()
+    if (covered.isEmpty()) return listOf(x0..x1)
+    val clipped = covered.mapNotNull { range ->
+        val start = maxOf(range.start, x0)
+        val end = minOf(range.endInclusive, x1)
+        if (end > start) start..end else null
+    }.sortedBy { it.start }
+    val segments = ArrayList<ClosedFloatingPointRange<Float>>(2)
+    var cursor = x0
+    for (range in clipped) {
+        if (range.start > cursor) {
+            segments.add(cursor..range.start)
+        }
+        if (range.endInclusive > cursor) {
+            cursor = range.endInclusive
+        }
+    }
+    if (x1 > cursor) {
+        segments.add(cursor..x1)
+    }
+    return segments
+}
+
+/**
  * 行信息
  */
 @Keep
@@ -364,12 +402,15 @@ data class TextLine(
     }
 
     /**
-     * 绘制下划线
+     * 绘制下划线（整页文字下划线）：经 [underlineYieldSegments] 让位行内
+     * 规则/笔记下划线后逐段绘制——同位置不再双线并行。
      */
     private fun drawUnderline(canvas: Canvas, underlineMode: Int) {
         val x0 = lineStart + indentWidth
         val x1 = lineEnd
         if (x1 <= x0) return
+        val segments = underlineYieldSegments(x0, x1, coveredUnderlineRanges())
+        if (segments.isEmpty()) return
         val paint = PaintPool.obtain()
         paint.set(textPaint)
         paint.style = Paint.Style.STROKE
@@ -382,20 +423,36 @@ data class TextLine(
         }
         paint.isAntiAlias = true
         val lineY = (lineBase - lineTop) + ReadBookConfig.underlineDistance.dpToPx()
-        when (underlineMode) {
-            UNDERLINE_MODE_SOLID -> canvas.drawLine(x0, lineY, x1, lineY, paint)
-            UNDERLINE_MODE_DASHED -> drawDashedUnderline(canvas, x0, x1, lineY, paint)
-            UNDERLINE_MODE_DOTTED -> drawDottedUnderline(canvas, x0, x1, lineY, paint)
-            UNDERLINE_MODE_DOUBLE -> drawDoubleUnderline(canvas, x0, x1, lineY, paint)
-            UNDERLINE_MODE_WAVY -> drawWavyUnderline(canvas, x0, x1, lineY, paint)
-            UNDERLINE_MODE_DOUBLE_DASHED -> {
-                val separation = paint.strokeWidth + 1f.dpToPx()
-                drawDashedUnderline(canvas, x0, x1, lineY - separation / 2f, paint)
-                drawDashedUnderline(canvas, x0, x1, lineY + separation / 2f, paint)
+        for (segment in segments) {
+            val segmentStart = segment.start
+            val segmentEnd = segment.endInclusive
+            when (underlineMode) {
+                UNDERLINE_MODE_SOLID -> canvas.drawLine(segmentStart, lineY, segmentEnd, lineY, paint)
+                UNDERLINE_MODE_DASHED -> drawDashedUnderline(canvas, segmentStart, segmentEnd, lineY, paint)
+                UNDERLINE_MODE_DOTTED -> drawDottedUnderline(canvas, segmentStart, segmentEnd, lineY, paint)
+                UNDERLINE_MODE_DOUBLE -> drawDoubleUnderline(canvas, segmentStart, segmentEnd, lineY, paint)
+                UNDERLINE_MODE_WAVY -> drawWavyUnderline(canvas, segmentStart, segmentEnd, lineY, paint)
+                UNDERLINE_MODE_DOUBLE_DASHED -> {
+                    val separation = paint.strokeWidth + 1f.dpToPx()
+                    drawDashedUnderline(canvas, segmentStart, segmentEnd, lineY - separation / 2f, paint)
+                    drawDashedUnderline(canvas, segmentStart, segmentEnd, lineY + separation / 2f, paint)
+                }
             }
         }
         PaintPool.recycle(paint)
     }
+
+    /**
+     * 行内更高优先级下划线的列覆盖区间（规则与笔记同源：列
+     * highlightStyle.underline，赢者全取的合并产物）；零宽线不构成覆盖
+     * （无可视线，与 highlightUnderlineRenderBottom 的 width > 0 口径一致）。
+     */
+    private fun coveredUnderlineRanges(): List<ClosedFloatingPointRange<Float>> =
+        columns.mapNotNull { column ->
+            (column as? TextBaseColumn)?.highlightStyle?.underline?.normalized()
+                ?.takeIf { it.width > 0f }
+                ?.let { column.start..column.end }
+        }
 
     private fun drawDashedUnderline(
         canvas: Canvas,

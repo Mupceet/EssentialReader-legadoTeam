@@ -217,6 +217,7 @@ class ReaderPageSnapshotMapperTest {
         indentWidth: Float = 20f,
         lineBaseY: Float = 40f,
         grayArgb: Int = 0xFF000000.toInt(),
+        coveredRanges: List<ClosedFloatingPointRange<Float>> = emptyList(),
     ) = wholePageUnderlineRuleLines(
         isTitle = isTitle,
         isImageLine = isImageLine,
@@ -227,6 +228,7 @@ class ReaderPageSnapshotMapperTest {
         lineBaseY = lineBaseY,
         spec = spec,
         grayArgb = grayArgb,
+        coveredRanges = coveredRanges,
     )
 
     @Test
@@ -296,6 +298,110 @@ class ReaderPageSnapshotMapperTest {
         // x1 <= x0（lineEnd 不大于缩进起点）跳过（引擎同款守卫）
         assertTrue(
             emitLine(underlineSpec(UNDERLINE_MODE_SOLID), lineStartX = 100f, lineEndX = 110f, indentWidth = 20f).isEmpty()
+        )
+    }
+
+    @Test
+    fun `让位覆盖挖空正文线其余断开成段`() {
+        // 行内 300..500 被规则/笔记下划线覆盖：正文线分成 120..300 与 500..900
+        // 两段（x0 = lineStart + indentWidth），y 口径与零高矩形不变
+        val lines = emitLine(
+            underlineSpec(UNDERLINE_MODE_SOLID),
+            coveredRanges = listOf(300f..500f),
+        )
+        assertEquals(2, lines.size)
+        assertEquals(120f, lines[0].left, 0f)
+        assertEquals(300f, lines[0].right, 0f)
+        assertEquals(500f, lines[1].left, 0f)
+        assertEquals(900f, lines[1].right, 0f)
+        assertTrue(lines.all { it.top == it.bottom })
+        assertEquals(52f, lines[0].top, 0f)
+    }
+
+    @Test
+    fun `整行覆盖与行内全覆盖不发射正文线`() {
+        assertTrue(
+            emitLine(
+                underlineSpec(UNDERLINE_MODE_SOLID),
+                coveredRanges = listOf(0f..2000f),
+            ).isEmpty()
+        )
+        // 覆盖恰为发射区间 [x0, x1] = [120, 900] 同样整行让位
+        assertTrue(
+            emitLine(
+                underlineSpec(UNDERLINE_MODE_SOLID),
+                coveredRanges = listOf(120f..900f),
+            ).isEmpty()
+        )
+    }
+
+    @Test
+    fun `双线系让位后每段发射两条`() {
+        val lines = emitLine(
+            underlineSpec(UNDERLINE_MODE_DOUBLE),
+            coveredRanges = listOf(300f..500f),
+        )
+        assertEquals(4, lines.size)
+        // 段一 120..300 双线 49/55，段二 500..900 双线 49/55
+        assertEquals(120f, lines[0].left, 0f)
+        assertEquals(300f, lines[0].right, 0f)
+        assertEquals(49f, lines[0].top, 0f)
+        assertEquals(55f, lines[1].top, 0f)
+        assertEquals(500f, lines[2].left, 0f)
+        assertEquals(49f, lines[2].top, 0f)
+        assertEquals(55f, lines[3].top, 0f)
+    }
+
+    @Test
+    fun `线形签名构覆盖_荧光带与删除线不构覆盖`() {
+        // 规则线形下划线（mode 1..4）underline 非空 → 让位覆盖
+        val solid = HighlightStyle().copy(underline = HighlightStyle.Underline())
+            .lineRunSignature(dpPx = { it }, baselineDropPx = 10f)!!
+        assertTrue(solid.underline != null)
+        // 删除线/荧光带/整行高亮带 underline 恒空 → 不让位（无可视下划线）
+        val strike = HighlightStyle(strike = HighlightStyle.Deco())
+            .lineRunSignature(dpPx = { it }, baselineDropPx = 10f)!!
+        assertNull(strike.underline)
+        val band = HighlightStyle(fill = 0xFFFF0000.toInt()).bandRunSignature()!!
+        assertNull(band.underline)
+    }
+
+    @Test
+    fun `笔记锚点命中块区间取首块左缘到末块右缘`() {
+        // 块 3 段（2/3/4 字），px 起点 100/300/500，行末 700：
+        // 锚点行内区间 3..8（跨第 2、3 块）→ 300..700
+        val range = anchorCoveredRange(
+            anchorStartLocal = 3,
+            anchorEndLocal = 8,
+            chunkLengths = listOf(2, 3, 4),
+            chunkStartX = floatArrayOf(100f, 300f, 500f),
+            lastChunkEndX = 700f,
+        )!!
+        assertEquals(300f, range.start, 0f)
+        assertEquals(700f, range.endInclusive, 0f)
+    }
+
+    @Test
+    fun `笔记锚点无命中与行外区间返回空`() {
+        // 锚点在本行覆盖之外（右侧越界）：无命中块
+        assertNull(
+            anchorCoveredRange(
+                anchorStartLocal = 20,
+                anchorEndLocal = 30,
+                chunkLengths = listOf(2, 3, 4),
+                chunkStartX = floatArrayOf(100f, 300f, 500f),
+                lastChunkEndX = 700f,
+            )
+        )
+        // 零长锚点区间不构成覆盖
+        assertNull(
+            anchorCoveredRange(
+                anchorStartLocal = 3,
+                anchorEndLocal = 3,
+                chunkLengths = listOf(2, 3, 4),
+                chunkStartX = floatArrayOf(100f, 300f, 500f),
+                lastChunkEndX = 700f,
+            )
         )
     }
 }
