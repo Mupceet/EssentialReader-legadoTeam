@@ -81,9 +81,10 @@ internal object MarksEngineImpl : MarksEngine {
                     )
                 )
             }
-            // 契约：落库后触发当前章重排（保持页内位置）——新快照携带划线
-            // 装饰推送，模块的待确认预览随 pageVersion 推进正常收尾
-            ReaderEngineImpl.relayout()
+            // 契约意图：新快照携带划线装饰推送，模块的待确认预览随
+            // pageVersion 推进正常收尾——划线是覆盖装饰不改分页，轻推送
+            // 避免全量重排在纯净模式的整页跳动
+            ReaderEngineImpl.notifyPageDecorationsChanged()
             true
         } catch (e: CancellationException) {
             throw e
@@ -97,7 +98,8 @@ internal object MarksEngineImpl : MarksEngine {
         return try {
             marking.content = note
             appDb.bookmarkDao.update(marking)
-            ReaderEngineImpl.relayout()
+            // 想法↔划线转换只改装饰线形，轻推送新快照
+            ReaderEngineImpl.notifyPageDecorationsChanged()
             MarkingNoteUpdate.Success
         } catch (e: CancellationException) {
             throw e
@@ -110,7 +112,7 @@ internal object MarksEngineImpl : MarksEngine {
         val marking = findBookmarkRow(markingId) ?: return false
         return try {
             appDb.bookmarkDao.delete(marking)
-            ReaderEngineImpl.relayout()
+            ReaderEngineImpl.notifyPageDecorationsChanged()
             true
         } catch (e: CancellationException) {
             throw e
@@ -142,7 +144,7 @@ internal object MarksEngineImpl : MarksEngine {
             if (samePage.isNotEmpty()) {
                 // 同页多条时删最近一条（契约快速书签语义）
                 appDb.bookmarkDao.delete(samePage.maxBy { it.time })
-                ReaderEngineImpl.relayout()
+                ReaderEngineImpl.notifyPageDecorationsChanged()
                 PageBookmarkToggle.Removed
             } else {
                 appDb.bookmarkDao.insert(
@@ -156,7 +158,7 @@ internal object MarksEngineImpl : MarksEngine {
                         bookText = ""
                     }
                 )
-                ReaderEngineImpl.relayout()
+                ReaderEngineImpl.notifyPageDecorationsChanged()
                 PageBookmarkToggle.Added
             }
         } catch (e: CancellationException) {
@@ -219,7 +221,9 @@ internal object MarksEngineImpl : MarksEngine {
             ?: return false
         return try {
             appDb.bookmarkDao.delete(row)
-            if (ReadBook.book != null) ReaderEngineImpl.relayout()
+            // 删除的标记若在当前章，轻推送新快照抹掉装饰；非当前章时重映射
+            // 当前页无变化（翻到该章自然按最新表渲染）
+            if (ReadBook.book != null) ReaderEngineImpl.notifyPageDecorationsChanged()
             true
         } catch (e: CancellationException) {
             throw e

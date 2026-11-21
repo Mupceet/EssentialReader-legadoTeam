@@ -569,6 +569,22 @@ internal object ReaderEngineImpl : ReaderEngine {
         ReadBook.loadContent(resetPageOffset = false)
     }
 
+    /**
+     * 装饰级轻推送（不重排）：重映射当前页经 onContentUpdated 推送新快照
+     * ——模块随 pageVersion 重绘收选区预览，与 [relayout] 的推送同通道。
+     *
+     * 契约「标记落库后触发当前章重排」的意图是新快照携带装饰推送；本宿主
+     * 划线/想法/页书签为纯覆盖装饰（快照装饰取自映射期书签表查询），不参与
+     * 分页几何——全量 relayout 的「清章 → 异步重分页 → 整页换新」窗口在
+     * 纯净模式（E-Ink）表现为整页跳动（实测）。MD3 宿主装饰参与分页须真
+     * 重排，本宿主轻推送满足同一契约意图。回调线程不限定（模块自行切主
+     * 线程）；落库先行于推送（MarksEngine 的 suspend 落库完成后调用）。
+     */
+    internal fun notifyPageDecorationsChanged() {
+        val adapter = ReadBook.callBack as? EngineCallBackAdapter ?: return
+        adapter.callback.onContentUpdated(relativePosition = 0, resetPageOffset = false, success = null)
+    }
+
     // ---- 图片动作 ----
 
     /** 图片点击分派防抖（毫秒窗口，对齐宿主完整模式 ReadBookActivity 图点连击间隔）。 */
