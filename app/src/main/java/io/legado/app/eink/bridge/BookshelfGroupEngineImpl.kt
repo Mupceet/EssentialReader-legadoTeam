@@ -13,6 +13,8 @@ import io.legado.app.eink.contract.BookshelfGroupUiModel
 import io.legado.app.eink.contract.BookshelfItemUiModel
 import io.legado.app.eink.contract.BookshelfShelfEntryUiModel
 import io.legado.app.help.book.isNotShelf
+import io.legado.app.help.config.AppConfig
+import io.legado.app.ui.main.bookshelf.sortedByBookshelfSort
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -203,7 +205,8 @@ internal object BookshelfGroupEngineImpl : BookshelfGroupEngine {
         require(filterId != BookshelfGroupIds.NONE) { "无筛选态走文件夹视图: observeShelfWithGroups" }
         return appDb.bookDao.flowByGroup(filterId)
             .map { books ->
-                books.map { BookshelfShelfEntryUiModel.Book(it.toBookshelfItemUiModel()) }
+                books.sortedByBookshelfSort(AppConfig.getBookSortByGroupId(filterId))
+                    .map { BookshelfShelfEntryUiModel.Book(it.toBookshelfItemUiModel()) }
             }
     }
 
@@ -211,7 +214,12 @@ internal object BookshelfGroupEngineImpl : BookshelfGroupEngine {
 
     override fun observeGroupBooks(groupId: Long): Flow<List<BookshelfItemUiModel>> =
         appDb.bookDao.flowByGroup(groupId)
-            .map { books -> books.map { it.toBookshelfItemUiModel() } }
+            .map { books ->
+                // 排序遵从完整模式书架排序档（组 bookSort 覆盖、全局兜底，
+                // 与完整模式进组视图同一排序键）
+                books.sortedByBookshelfSort(AppConfig.getBookSortByGroupId(groupId))
+                    .map { it.toBookshelfItemUiModel() }
+            }
 
     // —— 管理（用户组与系统筛选器的排序/显隐一次性整表提交） ——
 
@@ -320,7 +328,8 @@ internal object BookshelfGroupEngineImpl : BookshelfGroupEngine {
                 name = group.groupName,
                 bookCount = members.size,
                 covers = members
-                    .sortedByDescending { it.durChapterTime }
+                    // 封面预览排序同完整模式分组条目（组排序档）
+                    .sortedByBookshelfSort(AppConfig.getBookSortByGroupId(group.groupId))
                     .take(GROUP_COVER_COUNT)
                     .map { book ->
                         BookshelfCoverRefUiModel(

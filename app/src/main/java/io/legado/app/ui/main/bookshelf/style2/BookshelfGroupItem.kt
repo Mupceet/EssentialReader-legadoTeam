@@ -3,8 +3,7 @@ package io.legado.app.ui.main.bookshelf.style2
 import io.legado.app.constant.BookType
 import io.legado.app.data.entities.BookGroup
 import io.legado.app.data.entities.BookshelfBook
-import io.legado.app.utils.cnCompare
-import kotlin.math.max
+import io.legado.app.ui.main.bookshelf.sortedByBookshelfSort
 
 data class BookshelfGroupItem(
     val group: BookGroup,
@@ -38,15 +37,8 @@ internal fun buildBookshelfGroupItems(
     }
 }
 
-internal fun sortBookshelfBooks(books: List<BookshelfBook>, sort: Int): List<BookshelfBook> {
-    return when (sort) {
-        1 -> books.sortedByDescending { it.latestChapterTime }
-        2 -> books.sortedWith { first, second -> first.name.cnCompare(second.name) }
-        3 -> books.sortedBy { it.order }
-        4 -> books.sortedByDescending { max(it.latestChapterTime, it.durChapterTime) }
-        else -> books.sortedByDescending { it.durChapterTime }
-    }
-}
+internal fun sortBookshelfBooks(books: List<BookshelfBook>, sort: Int): List<BookshelfBook> =
+    books.sortedByBookshelfSort(sort)
 
 private fun BookshelfBook.belongsToGroup(groupId: Long): Boolean {
     val isAudio = type and BookType.audio > 0

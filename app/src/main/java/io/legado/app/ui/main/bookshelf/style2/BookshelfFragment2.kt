@@ -28,7 +28,7 @@ import io.legado.app.ui.book.info.BookInfoActivity
 import io.legado.app.ui.book.search.SearchActivity
 import io.legado.app.ui.main.bookshelf.BaseBookshelfFragment
 import io.legado.app.utils.MenuExtensions
-import io.legado.app.utils.cnCompare
+import io.legado.app.ui.main.bookshelf.sortedByBookshelfSort
 import io.legado.app.utils.flowWithLifecycleAndDatabaseChangeFirst
 import io.legado.app.utils.getCompatDrawable
 import io.legado.app.utils.observeEvent
@@ -48,7 +48,6 @@ import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlin.math.max
 
 /**
  * 书架界面
@@ -270,13 +269,7 @@ class BookshelfFragment2() : BaseBookshelfFragment(R.layout.fragment_bookshelf2)
     }
 
     private fun sortBooks(books: List<Book>, groupId: Long): List<Book> {
-        return when (AppConfig.getBookSortByGroupId(groupId)) {
-            1 -> books.sortedByDescending { it.latestChapterTime }
-            2 -> books.sortedWith { first, second -> first.name.cnCompare(second.name) }
-            3 -> books.sortedBy { it.order }
-            4 -> books.sortedByDescending { max(it.latestChapterTime, it.durChapterTime) }
-            else -> books.sortedByDescending { it.durChapterTime }
-        }
+        return books.sortedByBookshelfSort(AppConfig.getBookSortByGroupId(groupId))
     }
 
     fun back(): Boolean {

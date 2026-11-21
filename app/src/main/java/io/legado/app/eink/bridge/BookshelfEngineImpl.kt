@@ -15,6 +15,7 @@ import io.legado.app.help.book.BookHelp
 import io.legado.app.help.book.addType
 import io.legado.app.help.book.isLocal
 import io.legado.app.help.book.isUpError
+import io.legado.app.ui.main.bookshelf.sortedByBookshelfSort
 import io.legado.app.help.book.removeType
 import io.legado.app.help.book.sync
 import io.legado.app.model.CacheBook
@@ -95,7 +96,11 @@ internal object BookshelfEngineImpl : BookshelfEngine {
 
     override fun observeShelf(): Flow<List<BookshelfItemUiModel>> =
         appDb.bookDao.flowByGroup(BookGroup.IdAll)
-            .map { books -> books.map { it.toBookshelfItemUiModel() } }
+            .map { books ->
+                // 排序遵从完整模式书架排序档（全部视图无组行，取全局默认）
+                books.sortedByBookshelfSort(AppConfig.getBookSortByGroupId(BookGroup.IdAll))
+                    .map { it.toBookshelfItemUiModel() }
+            }
 
     override fun lastReadBookUrl(): String? = appDb.bookDao.lastReadBook?.bookUrl
 
