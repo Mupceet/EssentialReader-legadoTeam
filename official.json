@@ -1,19 +1,19 @@
 {
-  "tag_name": "3.26112111",
-  "name": "moben-legado_3.26112111",
-  "body": "本次更新：纯净模式页眉页脚遵从「阅读信息」配置并恢复分隔线设置，支持「文字下划线」渲染，新增网络恢复自愈，修复标记操作整页跳动等多处问题。\n\n- 纯净模式页眉页脚内容遵从「阅读信息」配置：页眉/页脚各三槽（时间、电量、页码、书名、章节名、进度、自定义模板等）与阅读界面同款渲染，此前固定为「时间/电量」与「章节名/页码进度」；电量图标以百分比文本显示\n- 纯净模式页眉/页脚分隔线设置恢复生效，与阅读界面共享同一开关\n- 纯净模式支持「文字下划线」：按当前配置呈现实线/虚线/双线（点状线显示为虚线、波浪线显示为实线），且与高亮规则、笔记下划线同位置时自动让位，不再叠加双线；阅读界面同样修复双线并行问题\n- 网络恢复自愈：断网导致的「获取正文失败」「详情页出错」，重新联网后自动重载恢复，无需手动刷新\n- 修复纯净模式长按画线、写想法、删除标记后整页跳动的问题，标记操作即时生效\n- 修复书架单本目录刷新按钮可能永久置灰的问题；纯净模式锁屏回前台后页眉时间与电量立即刷新",
+  "tag_name": "3.26112112",
+  "name": "moben-legado_3.26112112",
+  "body": "本次更新：纯净模式页眉页脚遵从「阅读信息」配置并恢复分隔线设置，支持「文字下划线」渲染，书架排序与完整模式同序，新增网络恢复自愈，修复标记操作整页跳动等多处问题。\n\n- 纯净模式页眉页脚内容遵从「阅读信息」配置：页眉/页脚各三槽（时间、电量、页码、书名、章节名、进度、自定义模板等）与阅读界面同款渲染，此前固定为「时间/电量」与「章节名/页码进度」；电量图标以百分比文本显示\n- 纯净模式页眉/页脚分隔线设置恢复生效，与阅读界面共享同一开关\n- 纯净模式支持「文字下划线」：按当前配置呈现实线/虚线/双线（点状线显示为虚线、波浪线显示为实线），且与高亮规则、笔记下划线同位置时自动让位，不再叠加双线；阅读界面同样修复双线并行问题\n- 书架排序修复：纯净模式平铺/筛选/分组内书籍与分组封面排序遵从完整模式的排序档设置（组覆盖、全局兜底），两界面同序\n- 网络恢复自愈：断网导致的「获取正文失败」「详情页出错」，重新联网后自动重载恢复，无需手动刷新\n- 修复纯净模式长按画线、写想法、删除标记后整页跳动的问题，标记操作即时生效\n- 修复书架单本目录刷新按钮可能永久置灰的问题；纯净模式锁屏回前台后页眉时间与电量立即刷新",
   "prerelease": false,
   "assets": [
     {
-      "browser_download_url": "https://github.com/Mupceet/EssentialReader-legadoTeam/releases/download/3.26112111/moben-legado_3.26112111_universal_vc38552.apk",
+      "browser_download_url": "https://github.com/Mupceet/EssentialReader-legadoTeam/releases/download/3.26112112/moben-legado_3.26112112_universal_vc38555.apk",
       "content_type": "application/vnd.android.package-archive",
-      "created_at": "2026-11-21T03:20:18Z",
+      "created_at": "2026-11-21T04:23:13Z",
       "download_count": 0,
-      "id": 774263939,
-      "name": "moben-legado_3.26112111_universal_vc38552.apk",
-      "size": 29161215,
+      "id": 774400844,
+      "name": "moben-legado_3.26112112_universal_vc38555.apk",
+      "size": 29161207,
       "state": "uploaded",
-      "url": "https://api.github.com/repos/Mupceet/EssentialReader-legadoTeam/releases/assets/774263939"
+      "url": "https://api.github.com/repos/Mupceet/EssentialReader-legadoTeam/releases/assets/774400844"
     }
   ]
 }
