@@ -6,6 +6,7 @@ import io.legado.app.constant.PreferKey
 import io.legado.app.eink.contract.EInkEngineRegistry
 import io.legado.app.eink.contract.GlobalSettings
 import io.legado.app.eink.contract.PageTurnRippleMode
+import io.legado.app.eink.platform.IReaderEpdcPageTurnEffect
 import io.legado.app.help.config.AppConfig
 import io.legado.app.help.config.ReadBookConfig
 import io.legado.app.ui.book.read.page.provider.ChapterProvider
@@ -98,7 +99,8 @@ object EInkBridge {
             marksEngine = MarksEngineImpl,
             bookshelfGroupEngine = BookshelfGroupEngineImpl,
             backupSyncEngine = BackupSyncEngineImpl,
-            pageTurnEffectEngine = PageTurnEffectEngineImpl,
+            // 翻页水波纹：0.8.4 起缺省装配模块内置掌阅 EPDC 实现（设备
+            // 能力自门控），宿主零 bridge 代码
             bookSourceEngine = BookSourceEngineImpl,
         )
         // 封面开关为快照状态缓存：每次进入 E-Ink 与宿主设置对齐，
@@ -358,9 +360,10 @@ private object GlobalSettingsImpl : GlobalSettings {
         }
 
     /**
-     * 翻页水波纹档位（E-Ink 自有偏好，默认关）：已注册
-     * [PageTurnEffectEngineImpl]（掌阅 EPDC 固件反射实现）——非掌阅
-     * 设备 supported=false，档位行自动隐藏，存储位保留。
+     * 翻页水波纹档位（E-Ink 自有偏好，默认关）：注册表缺省装配模块内置
+     * 掌阅 EPDC 实现（[IReaderEpdcPageTurnEffect]，0.8.4 起宿主零
+     * bridge 代码）——非掌阅设备 supported=false，档位行自动隐藏，存储
+     * 位保留。
      */
     override var pageTurnRippleMode: PageTurnRippleMode
         get() = PageTurnRippleMode.entries.firstOrNull {
