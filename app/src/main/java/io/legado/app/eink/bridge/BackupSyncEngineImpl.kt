@@ -33,8 +33,9 @@ import splitties.init.appCtx
  *
  * 宿主「测试」语义注：[AppWebDav.upConfig] 吞异常、成败以
  * [AppWebDav.isOk] 表达；账号密码错误时宿主链路 toast 提示并**清除
- * 已存密码键**（宿主自身设置页同款行为，端口侧不改写）——配置流会
- * 随之重发空密码字段。
+ * 已存密码键**（宿主自身设置页同款行为）——本端口经 [rebuildAuthorization]
+ * 在重建后回写密码，**保存与验证解耦**：保存/测试不销毁用户输入，
+ * 验证成败经测试返回值与宿主 toast 反馈。
  */
 object BackupSyncEngineImpl : BackupSyncEngine {
 
@@ -113,13 +114,31 @@ object BackupSyncEngineImpl : BackupSyncEngine {
         appCtx.putPrefString(PreferKey.webDavDir, config.dir)
         appCtx.putPrefString(PreferKey.webDavDeviceName, config.deviceName)
         // 宿主设置页同链：保存后即时重建运行时授权（成功时顺带目录初始化）
-        AppWebDav.upConfig()
+        rebuildAuthorization(config.password)
     }
 
     override suspend fun testWebDav(): Boolean {
         // 成败细节由宿主链路反馈（checkAuthorization 内置 toast）；返回
-        // isOk，模块不重复提示
-        return runCatching { AppWebDav.upConfig() }.isSuccess && AppWebDav.isOk
+        // isOk，模块不重复提示。测试同样不销毁已存密码（保存与验证解耦）
+        val saved = appCtx.getPrefString(PreferKey.webDavPassword).orEmpty()
+        return runCatching { rebuildAuthorization(saved) }.isSuccess && AppWebDav.isOk
+    }
+
+    /**
+     * 重建运行时授权（[AppWebDav.upConfig]：成功时顺带目录初始化），并保持
+     * 已存密码不被授权失败链清除。宿主既有语义为校验（401）失败即
+     * `removePref(webDavPassword)`——会把刚保存的密码一并销毁，保存与
+     * 验证未解耦（纯净模式实测表现为输入账号密码保存后密码字段被清空、
+     * 重输循环无法落盘）。本端口原则：保存/测试忠实持久化用户输入，
+     * 验证成败经 [testWebDav] 返回值与宿主链路 toast 反馈，不销毁数据。
+     */
+    private suspend fun rebuildAuthorization(password: String) {
+        AppWebDav.upConfig()
+        if (password.isNotEmpty() &&
+            appCtx.getPrefString(PreferKey.webDavPassword) != password
+        ) {
+            appCtx.putPrefString(PreferKey.webDavPassword, password)
+        }
     }
 
     override suspend fun backupNow() {
